@@ -86,6 +86,10 @@ async function hostedFromEnv(redisUrl: string) {
     answer: (t, c) => answerer.answer(t, c),
     // Phone calls when a website can't do it (BLAND_API_KEY); off when unset.
     voice: env.BLAND_API_KEY ? new BlandVoice(env.BLAND_API_KEY) : undefined,
+    // Per-user inboxes: MOMO_EMAIL_DOMAIN's MX goes to an inbound-email service
+    // that posts to /v1/hosted/email/<INBOUND_EMAIL_SECRET>.
+    emailDomain: env.MOMO_EMAIL_DOMAIN,
+    inboundEmailSecret: env.INBOUND_EMAIL_SECRET,
     log: (m) => console.error(m),
   });
   if (telegram) {

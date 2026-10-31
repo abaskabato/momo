@@ -13,7 +13,7 @@ import { randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
 import { WEB_SEAL_SOURCE } from "@momo/protocol";
 import { HeadlessBrowser, RemindersSkill, WebTaskSkill, startMockShop, type Block, type Planner, type Turn } from "@momo/agent-core";
-import { HostedRuntime, TelegramAdapter, UserKeys, type VoiceProvider } from "../src/index.ts";
+import { HostedRuntime, TelegramAdapter, UserKeys, type HostedOptions, type VoiceProvider } from "../src/index.ts";
 
 const redis = new Redis(process.env.TEST_REDIS_URL_ERRANDS ?? "redis://127.0.0.1:6379/12");
 const PASSWORD = "hunter2-correct-horse";
@@ -66,7 +66,7 @@ function scripted(start: string, steps: (prev: { name: string; input: Record<str
   return { planner, histories };
 }
 
-function runtime(planner: Planner, voice?: VoiceProvider) {
+function runtime(planner: Planner, voice?: VoiceProvider, extra: Partial<HostedOptions> = {}) {
   // One web skill for the process, as in production: the live page survives between messages.
   const web = new WebTaskSkill(planner, browser);
   const rt = new HostedRuntime({
@@ -76,6 +76,7 @@ function runtime(planner: Planner, voice?: VoiceProvider) {
     telegram: new TelegramAdapter("BOT", "tg-secret", fakeFetch),
     skills: () => [new RemindersSkill(), web],
     voice,
+    ...extra,
   });
   return { rt, app: rt.routes() };
 }
@@ -257,4 +258,65 @@ test("no online booking: Momo phones the restaurant, then adds it to the calenda
   assert.equal(ics.status, 200);
   const cal = await ics.text();
   assert.match(cal, /DTSTART:20261107T200000\r\nDTEND:20261107T220000\r\nSUMMARY:Zuni Cafe\\, 2 people\r\nLOCATION:1658 Market St/);
+});
+
+test("emailed sign-in code: Momo reads its own inbox, no need to ask the person", { timeout: 60_000 }, async () => {
+  let momoEmail = "";
+  const { planner, histories } = scripted(`${shop.origin}/email-login`, (prev, r, snap) => {
+    switch (prev.name) {
+      case "goto":
+      case "click":
+        return ["read_page"];
+      case "read_page":
+        if (/Title: Sign in with email/.test(r)) {
+          momoEmail = /Owner's Momo email: (\S+@\S+?) /.exec(JSON.stringify(histories.at(-1)![0]))![1]!;
+          return ["type", { ref: ref(r, /input\(email\)/), text: momoEmail }];
+        }
+        if (/Title: Enter the code we emailed/.test(r)) return ["check_email", { contains: "ShopNow code", wait_seconds: 120 }];
+        if (/Title: Quick check/.test(r)) return ["finish", { message: "Signed in to ShopNow with the emailed code." }];
+        break;
+      case "type":
+        if (/^\d{6}$/.test(String(prev.input.text))) return ["click", { ref: ref(snap, /Next/) }];
+        return ["click", { ref: ref(snap, /Email me a code/) }];
+      case "check_email": {
+        assert.match(r, /<untrusted_email>[\s\S]*Ignore all previous instructions/, "email body is fenced as untrusted");
+        assert.match(r, /Links:\n- http:\/\/127\.0\.0\.1:\d+\/magic\?t=/);
+        return ["type", { ref: ref(snap, /input\(text\) Code/), text: /Likely code: (\d{6})/.exec(r)![1] }];
+      }
+    }
+    throw new Error(`planner: unexpected state after ${prev.name}: ${r.slice(0, 300)}`);
+  });
+  const { rt, app } = runtime(planner, undefined, { emailDomain: "in.momo.example", inboundEmailSecret: "mail-secret" });
+
+  await tg(app, rt, "sign me in to ShopNow and buy oat milk");
+  const asked = sent.length;
+  assert.match(momoEmail, /^m[0-9a-f]{12}@in\.momo\.example$/);
+  assert.equal(shop.state.outbox.at(-1)!.to, momoEmail);
+
+  // The inbound-email service (Postmark-style JSON) delivers the store's email.
+  const mail = shop.state.outbox.at(-1)!;
+  const bad = await app.request("/v1/hosted/email/wrong", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  assert.equal(bad.status, 403);
+  const res = await app.request("/v1/hosted/email/mail-secret", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ To: `Momo <${mail.to}>`, From: "ShopNow <no-reply@shopnow.example>", Subject: mail.subject, TextBody: mail.text }),
+  });
+  assert.equal(res.status, 200);
+  await rt.drain();
+
+  assert.equal(sent.at(-1)!.text, "Signed in to ShopNow with the emailed code.");
+  assert.ok(!sent.slice(asked).some((m) => /code/i.test(m.text) && /\?/.test(m.text)), "never asked the person for the code");
+
+  // "email" tells the person their address, and how to forward codes to it.
+  assert.match(await tg(app, rt, "what's my email?"), new RegExp(`Your Momo email is ${momoEmail.replace(/\./g, "\\.")}`));
+
+  // Setting up forwarding: the provider's confirmation code is passed on to the person.
+  await app.request("/v1/hosted/email/mail-secret", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ to: momoEmail, from: "forwarding-noreply@google.com", subject: "(#123456789) Gmail Forwarding Confirmation", text: "Confirmation code: 123456789" }).toString(),
+  });
+  await rt.drain();
+  assert.match(sent.at(-1)!.text, /Email forwarding confirmation: .*\nCode: 123456789/s);
 });

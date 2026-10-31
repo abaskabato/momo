@@ -5,6 +5,7 @@
 
 import type { SecureFormSpec } from "@momo/protocol";
 import type { Approval, ApprovalGate, ApprovalRequest } from "./approvals.ts";
+import type { Email, Inbox } from "./inbox.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelRouter } from "./models.ts";
 import type { SpendPolicy, Task, TaskStore } from "./tasks.ts";
@@ -62,6 +63,8 @@ export interface SkillContext {
   requestSecret(task: Task, kind: "card" | "address"): Promise<string>;
   liveViews?: LiveViews;
   phone?: PhoneCaller;
+  /** The owner's Momo inbox (hosted), where sites send codes and confirmation links. */
+  inbox?: Inbox;
   /** A link that adds the event to the owner's calendar. */
   calendarLink(ev: CalendarEvent): string;
   /** Persist an approval request and text the owner the prompt. */
@@ -79,6 +82,8 @@ export interface Skill {
   onApproved(task: Task, approval: Approval, ctx: SkillContext): Promise<void>;
   onDenied?(task: Task, approval: Approval, ctx: SkillContext): Promise<void>;
   onTimer?(task: Task, event: string, ctx: SkillContext): Promise<void>;
+  /** An email arrived in the owner's Momo inbox while this task was active. */
+  onEmail?(task: Task, email: Email, ctx: SkillContext): Promise<void>;
   /** Reverse the committed action recorded in task.undo; returns the reply. */
   undo?(task: Task, ctx: SkillContext): Promise<string>;
 }

@@ -6,7 +6,7 @@
 // encrypted documents, run it, and save. No machine sits idle per user;
 // compute is spent only while a task runs.
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Redis } from "ioredis";
 import { Hono } from "hono";
 import { openJson, type SecureFormSpec, type SecureFormSubmission } from "@momo/protocol";
@@ -15,6 +15,7 @@ import type { ChannelAdapter, Inbound, TelegramAdapter, WhatsAppAdapter } from "
 import { userIdFor, type UserKeys } from "./keys.ts";
 import { LIVE_HEADERS, liveViewPage, PAGE_HEADERS, secureFormPage } from "./page.ts";
 import type { VoiceProvider } from "./phone.ts";
+import { parseInboundEmail, type InboundEmail } from "./email.ts";
 import { RedisDoc } from "./userdocs.ts";
 
 const FORM_TTL_S = 30 * 60;
@@ -35,6 +36,7 @@ type Job =
   | { kind: "message"; channel: Inbound["channel"]; from: string; text: string; at: number }
   | { kind: "secret"; sealed: string }
   | { kind: "resume"; taskId: string; text: string }
+  | { kind: "email"; email: Omit<InboundEmail, "to"> }
   | { kind: "tick" };
 
 export interface HostedOptions {
@@ -47,6 +49,10 @@ export interface HostedOptions {
   skills: () => Skill[];
   /** Answers messages that aren't errands. */
   answer?: (text: string, context: string) => Promise<string>;
+  /** Each user gets <token>@emailDomain; sites' codes and confirmations land there. */
+  emailDomain?: string;
+  /** Path secret for the inbound-email webhook. */
+  inboundEmailSecret?: string;
   /** Phone calls for errands a website can't do. */
   voice?: VoiceProvider;
   now?: () => Date;
@@ -155,6 +161,7 @@ export class HostedRuntime {
     const routeBlob = await this.o.redis.get(`user:${uid}`);
     if (!routeBlob) return;
     const route = JSON.parse(this.o.keys.decrypt(uid, "route", routeBlob)) as { channel: Inbound["channel"]; handle: string };
+    const inboxAddress = await this.mailbox(uid);
     const agent = await createAgent({
       docs: (name, fallback) => new RedisDoc(this.o.redis, this.o.keys, uid, name, fallback),
       keyProvider: new StaticKeyProvider(this.o.keys.dataKey(uid)),
@@ -172,6 +179,8 @@ export class HostedRuntime {
         },
       },
       publicUrl: this.o.baseUrl,
+      inboxAddress,
+      home: { channel: route.channel, threadId: route.handle },
       answer: this.o.answer,
       now: this.o.now,
     });
@@ -180,12 +189,26 @@ export class HostedRuntime {
       await agent.assistant.handle({ channel: job.channel, from: job.from, threadId: job.from, text: job.text, receivedAt: job.at });
     } else if (job.kind === "secret") {
       await agent.assistant.onSecretSubmitted(openJson<SecureFormSubmission>(this.o.keys.boxKeys(uid), job.sealed));
+    } else if (job.kind === "email") {
+      if (agent.inbox) await agent.assistant.onEmail(await agent.inbox.add(job.email));
     } else if (job.kind === "resume") {
       await agent.assistant.resumeTask(job.taskId, job.text);
     }
     const next = await agent.assistant.tick();
     if (next) await this.o.redis.zadd("hosted:timers", next, uid);
     else await this.o.redis.zrem("hosted:timers", uid);
+  }
+
+  /** The user's Momo email address, created on first use. The token is random, not derived from their handle. */
+  private async mailbox(uid: string): Promise<string | undefined> {
+    if (!this.o.emailDomain) return undefined;
+    let token = await this.o.redis.get(`mailbox:${uid}`);
+    if (!token) {
+      const fresh = `m${randomBytes(6).toString("hex")}`;
+      if (await this.o.redis.set(`mailbox:${uid}`, fresh, "NX")) await this.o.redis.set(`mail:${fresh}`, uid);
+      token = (await this.o.redis.get(`mailbox:${uid}`))!;
+    }
+    return `${token}@${this.o.emailDomain}`;
   }
 
   private base(): string {
@@ -277,6 +300,24 @@ export class HostedRuntime {
       }
       return c.json(ok);
     });
+
+    if (this.o.emailDomain && this.o.inboundEmailSecret) {
+      const secret = Buffer.from(this.o.inboundEmailSecret);
+      const domain = `@${this.o.emailDomain.toLowerCase()}`;
+      app.post("/v1/hosted/email/:secret", async (c) => {
+        const given = Buffer.from(c.req.param("secret"));
+        if (given.length !== secret.length || !timingSafeEqual(given, secret)) return c.text("forbidden", 403);
+        if (Number(c.req.header("content-length") ?? 0) > 5_000_000) return c.text("too large", 413);
+        const body = /json/.test(c.req.header("content-type") ?? "") ? await c.req.json() : await c.req.parseBody();
+        const mail = parseInboundEmail(body as Record<string, unknown>);
+        if (!mail) return c.json({ error: "no recipient" }, 400);
+        for (const to of mail.to.filter((t) => t.endsWith(domain))) {
+          const uid = await this.o.redis.get(`mail:${to.slice(0, -domain.length)}`);
+          if (uid) await this.enqueue(uid, { kind: "email", email: { from: mail.from, subject: mail.subject, text: mail.text, html: mail.html } });
+        }
+        return c.json(ok); // unknown addresses are dropped silently
+      });
+    }
 
     // A phone call ended; the token in the URL is the only proof needed (single use).
     app.post("/v1/hosted/calls/:token", async (c) => {

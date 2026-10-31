@@ -133,3 +133,12 @@ test("model specs: any provider/model", async () => {
   assert.throws(() => parseModelSpec("nope", {}));
   assert.throws(() => parseModelSpec("acme/x", {}), /unknown provider/);
 });
+
+test("email codes and links are found in real-looking emails", async () => {
+  const { guessCode, extractLinks } = await import("../src/inbox.ts");
+  assert.equal(guessCode({ subject: "Your code", text: "Order #48213 total $18. Your verification code is 731942." }), "731942");
+  assert.equal(guessCode({ subject: "Sign in to Acme", text: "Use 4821 to sign in." }), "4821");
+  assert.equal(guessCode({ subject: "(#123456789) Gmail Forwarding Confirmation", text: "Confirmation code: 123456789" }), "123456789");
+  assert.equal(guessCode({ subject: "Welcome", text: "Thanks for joining." }), undefined);
+  assert.deepEqual(extractLinks('<a href="https://x.com/v?a=1&amp;b=2">go</a> https://x.com/logo.png and https://y.com/ok.'), ["https://x.com/v?a=1&b=2", "https://y.com/ok"]);
+});

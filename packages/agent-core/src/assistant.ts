@@ -7,9 +7,10 @@
 // Anything else returns { handled: false } so the host (OpenClaw's general
 // agent) can take it.
 
-import type { InboundMessage, SecureFormSubmission } from "@momo/protocol";
+import type { Channel, InboundMessage, SecureFormSubmission } from "@momo/protocol";
 import { ApprovalGate, type Approval, type ApprovalRequest } from "./approvals.ts";
 import type { Outbound } from "./channels.ts";
+import { guessCode, type Email, type Inbox } from "./inbox.ts";
 import type { Owners } from "./owners.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelRouter } from "./models.ts";
@@ -34,6 +35,9 @@ export interface AssistantDeps {
   secureLinks?: SecureLinks;
   liveViews?: LiveViews;
   phone?: PhoneCaller;
+  inbox?: Inbox;
+  /** Where to text the owner about things no task started (hosted: their chat). */
+  home?: { channel: Channel; threadId: string };
   /** Public base URL in hosted mode; calendar links point at its .ics endpoint. */
   publicUrl?: string;
   /** Answers anything that isn't an errand (questions, chit-chat). Hosted mode has no other brain. */
@@ -98,6 +102,7 @@ export class Assistant {
       },
       liveViews: deps.liveViews,
       phone: deps.phone,
+      inbox: deps.inbox,
       calendarLink: (ev) => calendarLink(ev, deps.publicUrl),
       askApproval: async (task: Task, req: Omit<ApprovalRequest, "taskId">): Promise<Approval> => {
         const a = await deps.approvals.request({ ...req, taskId: task.id });
@@ -167,6 +172,15 @@ export class Assistant {
     if (/^(status|what are you doing\??)$/i.test(text)) {
       const active = await this.d.tasks.active();
       await say(active.length ? active.map((t) => `• ${t.request} (${t.status.replace("_", " ")})`).join("\n") : "Nothing in progress.");
+      return { handled: true };
+    }
+
+    if (/^(what'?s )?(my )?(momo )?e-?mail( address)?\??$/i.test(text) && this.d.inbox) {
+      await say(
+        `Your Momo email is ${this.d.inbox.address}\n` +
+          "Sites can send sign-in codes and confirmations there and I'll handle them. " +
+          "To let me see codes sent to your own email, forward them there (in Gmail: Settings → Forwarding, or a filter for \"code\" emails).",
+      );
       return { handled: true };
     }
 
@@ -251,6 +265,24 @@ export class Assistant {
     await this.d.outbound.send(task.channel, task.threadId, `Saved your ${form.label}${form.kind === "login" ? " login" : ""}. Continuing.`);
     const skill = this.skill(task.skill);
     if (skill?.onInput && task.status === "awaiting_input") await this.guard(task, () => skill.onInput!(task, "done", this.ctx));
+  }
+
+  /** An email reached the owner's Momo inbox (already stored there). */
+  async onEmail(email: Email): Promise<void> {
+    let used = false;
+    for (const t of await this.d.tasks.active()) {
+      const skill = this.skill(t.skill);
+      if (skill?.onEmail) {
+        used = true;
+        await this.guard(t, () => skill.onEmail!(t, email, this.ctx));
+      }
+    }
+    // Setting up forwarding (e.g. Gmail) sends a confirmation code here; pass it on.
+    if (!used && /forward/i.test(`${email.from} ${email.subject}`)) {
+      const to = this.d.home ?? (await this.d.tasks.all()).at(-1);
+      const code = guessCode(email);
+      if (to) await this.d.outbound.send(to.channel, to.threadId, `Email forwarding confirmation: ${email.subject}${code ? `\nCode: ${code}` : ""}`);
+    }
   }
 
   /**

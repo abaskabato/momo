@@ -18,6 +18,7 @@ import { fillLogin, type BrowserSessionFactory } from "../../browser.ts";
 import type { Approval } from "../../approvals.ts";
 import type { Skill, SkillContext } from "../../skill.ts";
 import type { AddressSecret, PaymentSecret } from "../../vault.ts";
+import { guessCode, matchesEmail, type Email } from "../../inbox.ts";
 import type { Task } from "../../tasks.ts";
 
 export type Block =
@@ -72,6 +73,7 @@ export const WEB_TOOLS: ToolSpec[] = [
   { name: "type", description: "Type text into element [n]. Never type passwords; use sign_in.", input_schema: obj({ ref: num, text: str }, ["ref", "text"]) },
   { name: "sign_in", description: "Fill the owner's saved login for this site into the username [user_ref] and password [pass_ref] fields and submit [submit_ref].", input_schema: obj({ user_ref: num, pass_ref: num, submit_ref: num }, ["user_ref", "pass_ref", "submit_ref"]) },
   { name: "enter_code", description: "The site sent the owner a sign-in/verification code. Asks them for it and types it into [ref].", input_schema: obj({ ref: num, question: str }, ["ref", "question"]) },
+  { name: "check_email", description: "Read the owner's Momo inbox for an email a site just sent (a code, a 'confirm your email' link, a confirmation). Waits up to wait_seconds for it to arrive. contains: words to match in sender/subject/body.", input_schema: obj({ contains: str, wait_seconds: num }, []) },
   { name: "fill_card", description: "Fill the owner's saved card into the payment fields. Only after the owner approved the purchase (request_approval). Map each field number to: name, number, exp (MM/YY), exp_month, exp_year (4 digits), exp_year2 (2 digits), cvc, zip.", input_schema: obj({ fields: fieldList(CARD_FIELDS) }, ["fields"]) },
   { name: "fill_address", description: "Fill the owner's saved delivery address. Map each field number to: name, line1, line2, city, region (state), postal, country, phone.", input_schema: obj({ fields: fieldList(ADDRESS_FIELDS) }, ["fields"]) },
   { name: "hand_to_owner", description: "For a CAPTCHA, 'are you human' check, or anything only a person can do: sends the owner a live view of this browser to finish that one step, then you continue.", input_schema: obj({ reason: str }, ["reason"]) },
@@ -86,7 +88,7 @@ export const WEB_TOOLS: ToolSpec[] = [
 export const WEB_SYSTEM = `You are Momo, finishing a real errand for the owner in a web browser. Getting it done is the job.
 Work step by step: goto, read_page, then act on element numbers. Be decisive; prefer the obvious choice that matches the request and the owner's known preferences. Ask the owner only when a wrong guess would matter.
 Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms and total, then do it.
-Logins: sign_in. Codes the site sends the owner: enter_code. Payment: fill_card (after approval). Shipping: fill_address. Never ask the owner for passwords or card numbers in chat.
+Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. Never ask the owner for passwords or card numbers in chat.
 CAPTCHA or "verify you're human": hand_to_owner, then continue.
 If a site fails (blocked, sold out, broken, no availability), don't give up: find another site that can do it (search with https://html.duckduckgo.com/html/?q=...), or call_phone the business. Tell the owner what you changed.
 When the owner states a lasting preference, remember it. For anything booked at a time, add_to_calendar.
@@ -106,10 +108,14 @@ interface State {
   /** Origin of the page when the owner approved; the card is only filled there. */
   approvedOrigin?: string;
   calendar?: string;
+  /** Inbox emails older than this aren't for this errand. */
+  emailSince?: number;
+  seenEmails?: string[];
+  emailFilter?: string;
   steps: number;
 }
 
-type Pause = "answer" | "approval" | "login" | "secret" | "code" | "live" | "call";
+type Pause = "answer" | "approval" | "login" | "secret" | "code" | "live" | "call" | "email";
 type Outcome = { result: string; error?: boolean } | { pause: Pause; selector?: string } | { done: string };
 type Session = { page: Page; close: () => Promise<void>; refs: Map<number, string>; usedAt: number };
 
@@ -140,8 +146,9 @@ export class WebTaskSkill implements Skill {
       city && `Owner's city: ${city}.`,
       prefs && `Known preferences: ${prefs}.`,
       saved && `Saved in their vault: ${saved}.`,
+      ctx.inbox && `Owner's Momo email: ${ctx.inbox.address} (use it for sign-ups and "email me a code"; check_email reads it).`,
     ].filter(Boolean).join(" ");
-    task.data = { steps: 0, history: [{ role: "user", content: [{ type: "text", text: `${about}\nToday is ${ctx.now().toDateString()}.\nErrand: ${task.request}` }] }] } satisfies State;
+    task.data = { steps: 0, emailSince: ctx.now().getTime() - 2 * 60_000, history: [{ role: "user", content: [{ type: "text", text: `${about}\nToday is ${ctx.now().toDateString()}.\nErrand: ${task.request}` }] }] } satisfies State;
     await ctx.reply(task, "On it.");
     await this.run(task, ctx);
   }
@@ -164,6 +171,10 @@ export class WebTaskSkill implements Skill {
       case "call":
         result = text;
         break;
+      case "email":
+        // The owner can't answer this one by chat; their reply is just context.
+        result = `Still waiting on the email. The owner said: ${text}`;
+        break;
       case "code": {
         const code = /\b\d{4,8}\b/.exec(text)?.[0] ?? /\b[A-Za-z0-9]{4,10}\b/.exec(text)?.[0];
         if (!code) {
@@ -183,6 +194,21 @@ export class WebTaskSkill implements Skill {
         result = `Owner answered: ${text}`;
     }
     this.resume(s, result);
+    await this.run(task, ctx);
+  }
+
+  async onEmail(task: Task, email: Email, ctx: SkillContext): Promise<void> {
+    const s = task.data as unknown as State;
+    if (s.waitingFor?.kind !== "email" || !matchesEmail(email, s.emailFilter)) return;
+    s.seenEmails = [...(s.seenEmails ?? []), email.id];
+    this.resume(s, describeEmail(email));
+    await this.run(task, ctx);
+  }
+
+  async onTimer(task: Task, event: string, ctx: SkillContext): Promise<void> {
+    const s = task.data as unknown as State;
+    if (event !== "email-timeout" || s.waitingFor?.kind !== "email") return;
+    this.resume(s, "No matching email arrived in time. Try resending it, or use enter_code / ask_owner.");
     await this.run(task, ctx);
   }
 
@@ -309,6 +335,21 @@ export class WebTaskSkill implements Skill {
         task.status = "awaiting_input";
         await ctx.reply(task, String(i.question));
         return { pause: "code", selector };
+      }
+      case "check_email": {
+        if (!ctx.inbox) return { result: "There's no Momo inbox here. Use enter_code to ask the owner for the code.", error: true };
+        const filter = i.contains ? String(i.contains) : undefined;
+        const fresh = (await ctx.inbox.since(s.emailSince ?? 0)).filter((e) => !s.seenEmails?.includes(e.id) && matchesEmail(e, filter));
+        const hit = fresh.at(-1);
+        if (hit) {
+          s.seenEmails = [...(s.seenEmails ?? []), hit.id];
+          return { result: describeEmail(hit) };
+        }
+        const wait = Math.min(300, Math.max(10, Number(i.wait_seconds) || 120));
+        s.emailFilter = filter;
+        await ctx.timers.add(task.id, "email-timeout", ctx.now().getTime() + wait * 1000);
+        task.status = "waiting";
+        return { pause: "email" };
       }
       case "fill_card": {
         if (!s.commitAllowed || !s.approvedArgs) return { result: "Refused: the owner hasn't approved this purchase. Call request_approval first.", error: true };
@@ -461,6 +502,17 @@ export class WebTaskSkill implements Skill {
     this.pages.delete(taskId);
     await sess?.close().catch(() => {});
   }
+}
+
+/** An email for the planner: the likely code and links up front, the body as untrusted data. */
+function describeEmail(e: Email): string {
+  const code = guessCode(e);
+  return [
+    `Email from ${e.from}, subject "${e.subject}".`,
+    code && `Likely code: ${code}`,
+    e.links.length && `Links:\n${e.links.map((l) => `- ${l}`).join("\n")}`,
+    `<untrusted_email>\n${e.text.slice(0, 2500)}\n</untrusted_email>`,
+  ].filter(Boolean).join("\n");
 }
 
 /** Run an action and, if it starts a navigation (form posts, redirects), wait for the new page. */

@@ -2,12 +2,13 @@
 // owner's device: keys, vault, tasks, approvals, timers, preferences.
 
 import { join } from "node:path";
-import { generateDeviceKeys, type DeviceKeys } from "@momo/protocol";
+import { generateDeviceKeys, type Channel, type DeviceKeys } from "@momo/protocol";
 import { ApprovalGate, type Approval } from "./approvals.ts";
 import { Assistant, type PendingForm } from "./assistant.ts";
 import { Owners, type OnboardingStep, type OwnerState } from "./owners.ts";
 import type { LiveViews, PhoneCaller, SecureLinks } from "./skill.ts";
 import type { Outbound } from "./channels.ts";
+import { Inbox, type Email } from "./inbox.ts";
 import { LocalMemory } from "./memory.ts";
 import type { ModelRouter } from "./models.ts";
 import type { Skill } from "./skill.ts";
@@ -33,6 +34,9 @@ export interface AgentOptions {
   liveViews?: LiveViews;
   phone?: PhoneCaller;
   publicUrl?: string;
+  /** The owner's Momo email address (hosted); enables the inbox. */
+  inboxAddress?: string;
+  home?: { channel: Channel; threadId: string };
   keyProvider?: KeyProvider;
   spend?: SpendPolicyConfig;
   models?: ModelRouter;
@@ -63,6 +67,7 @@ export async function createAgent(o: AgentOptions & { keyProvider: KeyProvider }
   const memory = new LocalMemory(o.docs<Record<string, string>>("preferences", () => ({})), o.memoryNotesDir, now);
   const owners = new Owners(o.docs<OwnerState>("owner", () => Owners.fresh(o.ownerHandles ?? [], o.onboarding)));
   const claimCode = await owners.claimCode();
+  const inbox = o.inboxAddress ? new Inbox(o.inboxAddress, o.docs<Email[]>("inbox", () => []), nowMs) : undefined;
   const assistant = new Assistant({
     skills: o.skills(vault),
     tasks,
@@ -78,11 +83,13 @@ export async function createAgent(o: AgentOptions & { keyProvider: KeyProvider }
     liveViews: o.liveViews,
     phone: o.phone,
     publicUrl: o.publicUrl,
+    inbox,
+    home: o.home,
     answer: o.answer,
     pendingForms: o.docs<PendingForm[]>("forms", () => []),
     now,
   });
-  return { assistant, vault, tasks, approvals, timers, memory, spend, owners, claimCode };
+  return { assistant, vault, tasks, approvals, timers, memory, spend, owners, claimCode, inbox };
 }
 
 /** Device identity: generated once, stored locally, never uploaded except public halves. */

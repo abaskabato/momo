@@ -25,3 +25,4 @@ export * from "./skills/web/claude.ts";
 export * from "./skills/reminders.ts";
 export * from "./llm.ts";
 export { runErrand, report, type Errand, type EvalResult } from "./eval.ts";
+export * from "./inbox.ts";

@@ -138,3 +138,12 @@ test("check-in cadence tightens toward the next due item", async () => {
   const soon = await client.checkin({ state: "going-to-sleep", ack: [], nextLocalDueAt: Date.now() + 120_000 });
   assert.ok(soon.nextCheckinMs <= 120_000 && soon.nextCheckinMs > 100_000);
 });
+
+test("inbound email: Postmark, SendGrid and Mailgun shapes all parse", async () => {
+  const { parseInboundEmail } = await import("../src/hosted/email.ts");
+  const pm = parseInboundEmail({ To: "Momo <m1@in.x.com>", From: "a@b.com", Subject: "S", TextBody: "T" });
+  assert.deepEqual(pm, { to: ["m1@in.x.com"], from: "a@b.com", subject: "S", text: "T", html: undefined });
+  assert.equal(parseInboundEmail({ to: "m2@in.x.com, other@z.com", from: "a", subject: "S", text: "T" })!.to[1], "other@z.com");
+  assert.equal(parseInboundEmail({ recipient: "m3@in.x.com", sender: "a", subject: "S", "body-plain": "T" })!.text, "T");
+  assert.equal(parseInboundEmail({ subject: "no recipient" }), null);
+});

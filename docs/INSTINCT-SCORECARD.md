@@ -32,6 +32,7 @@ the most. Then fix the most common failure and run it again.
 
 | Blocker | Now |
 |---|---|
+| Sites email a code or a "confirm your email" link | Momo reads its own inbox (each person gets a Momo email address) and carries on, no question asked |
 | Sites text a sign-in code | Momo asks "what's the code?" and types it in |
 | CAPTCHAs / "are you human" | Momo sends a live view of the page. You tap through that one step on your phone, and Momo carries on |
 | Paying | You add your card once by secure link. Momo fills it in at checkout after your YES |
@@ -47,7 +48,8 @@ the most. Then fix the most common failure and run it again.
 
 1. **Run the eval on real sites** and fix what it finds. This needs an API
    key for any model (`MOMO_MODEL`).
-2. **Email:** read confirmation emails and sign-in codes sent by email.
+2. **Live email:** point a domain at an inbound-email service
+   (`MOMO_EMAIL_DOMAIN`) and test with real sites' emails.
 3. **Live phone calls:** set `BLAND_API_KEY` and test real calls. The
    integration is written but has not been run against Bland's live API.
 4. **Production:** a sandboxed browser per errand, KMS for keys, rate limits,

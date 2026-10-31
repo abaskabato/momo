@@ -77,10 +77,17 @@ The server registers the Telegram webhook on startup. For WhatsApp, point the
 Cloud API webhook at `/v1/hosted/whatsapp`. Each user's data is encrypted with
 a key derived from `MOMO_MASTER_KEY` (use a KMS in production).
 
-Optional: `BLAND_API_KEY` lets Momo phone businesses that can't be booked
-online; `MOMO_WORKERS` (default 8) sets how many errands run at once.
+Optional:
+- `BLAND_API_KEY`: Momo phones businesses that can't be booked online.
+- `MOMO_EMAIL_DOMAIN` + `INBOUND_EMAIL_SECRET`: every user gets a Momo email
+  address (text "email" to see it). Point the domain's MX at any inbound-email
+  service (Postmark, SendGrid Inbound Parse, Mailgun, a Cloudflare Email
+  Worker) posting to `/v1/hosted/email/<INBOUND_EMAIL_SECRET>`. Emailed codes
+  and "confirm your email" links are then handled without asking the person.
+- `MOMO_WORKERS` (default 8): how many errands run at once.
 
-What keeps errands moving: sign-in codes are asked for and typed in; CAPTCHAs
+What keeps errands moving: emailed codes and links are read from the user's
+Momo inbox; texted codes are asked for and typed in; CAPTCHAs
 go to the person as a live view (`/l/…`) for that one step; card and address
 are added once by secure link and filled at checkout after a YES; failing
 sites fall back to another site or a phone call; bookings come with an
