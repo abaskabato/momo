@@ -129,13 +129,24 @@ export function fromChatChoice(message: { content?: string | null; tool_calls?: 
   return blocks;
 }
 
-async function chat(s: ModelSpec, fetchImpl: typeof fetch, body: Record<string, unknown>) {
-  const res = await fetchImpl(`${s.baseUrl!.replace(/\/$/, "")}/chat/completions`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(s.apiKey && { authorization: `Bearer ${s.apiKey}` }) },
-    body: JSON.stringify({ model: s.model, ...body }),
-    signal: AbortSignal.timeout(180_000),
-  });
+/** Rate limits and overloads are routine (especially on free tiers): retry with backoff. */
+const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const RETRIES = 5;
+
+async function chat(s: ModelSpec, fetchImpl: typeof fetch, body: Record<string, unknown>, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))) {
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetchImpl(`${s.baseUrl!.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(s.apiKey && { authorization: `Bearer ${s.apiKey}` }) },
+      body: JSON.stringify({ model: s.model, ...body }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (res.ok || !RETRY_STATUS.has(res.status) || attempt >= RETRIES) break;
+    const after = Number(res.headers.get("retry-after"));
+    await res.body?.cancel();
+    await sleep(after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** attempt * 2000, 30_000) * (0.75 + Math.random() / 2));
+  }
   if (!res.ok) throw new Error(`${s.provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = (await res.json()) as { choices: Array<{ message: Parameters<typeof fromChatChoice>[0] }> };
   return json.choices[0]!.message;
