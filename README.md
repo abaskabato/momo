@@ -12,6 +12,15 @@ your YES. `STOP` cancels everything. `UNDO` reverses the last thing it did.
 
 ## Quick start
 
+People set Momo up on its website (`apps/web`, deployed on Vercel). It runs
+on their own computer, installed with one line:
+
+```bash
+curl -fsSL https://your-momo.vercel.app/install.sh | sh   # Mac, Linux (Windows: install.ps1)
+```
+
+Or by hand:
+
 ```bash
 npm install
 npm run setup   # model key + Telegram bot token, checked; writes .env
@@ -19,7 +28,7 @@ npm start       # prints your bot's link: text it
 ```
 
 Full guide: [docs/SETUP.md](docs/SETUP.md). Every setting: [.env.example](.env.example).
-Docker: `docker compose up -d`.
+For a server shared by many people: `docker compose up -d` (Redis).
 
 See [docs/INSTINCT-SCORECARD.md](docs/INSTINCT-SCORECARD.md) for what's built
 and what isn't there yet.

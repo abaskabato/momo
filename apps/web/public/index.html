@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Set up Momo</title>
+<meta name="description" content="Text Momo on Telegram and errands get done. Set it up in a few minutes; it runs on your own computer.">
+<link rel="stylesheet" href="/style.css">
+<script src="/setup.js" defer></script>
+</head>
+<body>
+<main>
+  <h1>Set up Momo</h1>
+  <p>You text Momo on Telegram and it does the errand: bookings, orders, reminders, anything on a website. It asks before it books or buys. It runs on your own computer, and this page only helps you set it up. Your keys stay in this browser and go only to the companies that issued them.</p>
+
+  <section class="step" id="s-model">
+    <h2><span class="num">1</span>Pick the AI that drives Momo</h2>
+    <label for="provider">AI provider</label>
+    <select id="provider"></select>
+    <p class="note" id="key-help"></p>
+    <div id="key-row">
+      <label for="key">API key</label>
+      <input id="key" autocomplete="off" spellcheck="false">
+    </div>
+    <label for="model">Model</label>
+    <input id="model" autocomplete="off" spellcheck="false">
+    <button id="check-model" class="quiet" type="button">Check the key</button>
+    <p class="note" id="model-status" role="status"></p>
+  </section>
+
+  <section class="step" id="s-bot">
+    <h2><span class="num">2</span>Make your Telegram bot</h2>
+    <p class="note">In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, send <b>/newbot</b>, pick any name, and paste the token it gives you here.</p>
+    <label for="bot">Bot token</label>
+    <input id="bot" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+    <button id="check-bot" class="quiet" type="button">Check the bot</button>
+    <p class="note" id="bot-status" role="status"></p>
+  </section>
+
+  <section class="step" id="s-where">
+    <h2><span class="num">3</span>What Momo can use</h2>
+    <label for="where">Momo works in</label>
+    <select id="where">
+      <option value="web">Its own private web browser (recommended)</option>
+      <option value="local">Any app on this computer's screen too</option>
+    </select>
+    <p class="note" id="where-note">Momo uses websites in a browser of its own, so it doesn't touch yours.</p>
+  </section>
+
+  <section class="step" id="s-get">
+    <h2><span class="num">4</span>Install it on this computer</h2>
+    <p class="note">This saves a settings file (momo.env) to your Downloads folder. Keep it private: it holds your keys.</p>
+    <button id="download" type="button">Download my settings</button>
+    <p class="note" id="get-status" role="status"></p>
+    <div id="install" hidden>
+      <p class="note">Then open a terminal and paste this. It installs Momo and starts it in the background, now and whenever the computer starts.</p>
+      <div class="tabs" role="group" aria-label="Your computer">
+        <button type="button" data-os="mac" aria-pressed="true">Mac</button>
+        <button type="button" data-os="linux" aria-pressed="false">Linux</button>
+        <button type="button" data-os="windows" aria-pressed="false">Windows</button>
+      </div>
+      <p class="note" id="os-how"></p>
+      <pre id="cmd"></pre>
+      <button id="copy" class="quiet" type="button">Copy</button>
+      <p class="note">When it's done, text your bot <b id="bot-link"></b>. Leave the computer on: Momo works while it's awake.</p>
+    </div>
+  </section>
+</main>
+</body>
+</html>

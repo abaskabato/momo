@@ -5,7 +5,7 @@
 //   3. A public https address, if there is one (else Telegram is polled).
 //   4. Where Momo works: a private browser, your own computer (agent-desktop),
 //      or a cloud computer per person.
-//   5. Redis: checked.
+//   5. Storage: a file by default; Redis (checked) for a shared server.
 // Secrets it generates (master key, webhook secret) are kept on re-runs.
 
 import { randomBytes } from "node:crypto";
@@ -135,17 +135,20 @@ async function main() {
   if (where === "2") console.log("  Install it with: npm install -g agent-desktop   (macOS: then run `agent-desktop permissions --guide`)");
   if (where === "3") console.log("  Build the desktop image once: docker build -f Dockerfile.desktop -t momo-desktop .");
 
-  // 5. Redis
-  updates.REDIS_URL = await ask("Redis URL", env.REDIS_URL ?? "redis://127.0.0.1:6379");
-  try {
-    const { Redis } = await import("ioredis");
-    const r = new Redis(updates.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
-    await r.connect();
-    await r.ping();
-    r.disconnect();
-    console.log("  OK: Redis is reachable.");
-  } catch {
-    console.log("  Can't reach Redis. Start one with: docker compose up -d redis");
+  // 5. Storage: a file in ~/.momo by default; Redis only for a shared server.
+  const redisUrl = await ask("Redis URL (leave blank on your own computer: Momo saves to ~/.momo)", env.REDIS_URL ?? "");
+  updates.REDIS_URL = redisUrl || undefined;
+  if (redisUrl) {
+    try {
+      const { Redis } = await import("ioredis");
+      const r = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 0, retryStrategy: () => null });
+      await r.connect();
+      await r.ping();
+      r.disconnect();
+      console.log("  OK: Redis is reachable.");
+    } catch {
+      console.log("  Can't reach Redis. Start one with: docker compose up -d redis");
+    }
   }
 
   rl.close();

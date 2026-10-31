@@ -1,18 +1,18 @@
 // The agent's JSON documents for one hosted user, encrypted with that user's
-// key and stored in Redis. Writes for one user are serialized by the runtime.
+// key and stored in KV. Writes for one user are serialized by the runtime.
 
-import type { Redis } from "ioredis";
+import type { KV } from "./kv.ts";
 import type { Doc } from "@momo/agent-core";
 import type { UserKeys } from "./keys.ts";
 
 export class RedisDoc<T> implements Doc<T> {
-  private readonly redis: Redis;
+  private readonly redis: KV;
   private readonly keys: UserKeys;
   private readonly userId: string;
   private readonly name: string;
   private readonly fallback: () => T;
 
-  constructor(redis: Redis, keys: UserKeys, userId: string, name: string, fallback: () => T) {
+  constructor(redis: KV, keys: UserKeys, userId: string, name: string, fallback: () => T) {
     this.redis = redis;
     this.keys = keys;
     this.userId = userId;

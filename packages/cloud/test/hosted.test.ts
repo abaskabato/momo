@@ -10,6 +10,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
+import { fromRedis } from "../src/hosted/kv.ts";
 import { WEB_SEAL_SOURCE } from "@momo/protocol";
 import {
   HeadlessBrowser,
@@ -23,7 +24,8 @@ import {
   type Planner,
   type Turn,
 } from "@momo/agent-core";
-import { HostedRuntime, TelegramAdapter, UserKeys, WhatsAppAdapter } from "../src/index.ts";
+import { HostedRuntime, TelegramAdapter, UserKeys, WhatsAppAdapter, type HostedOptions } from "../src/index.ts";
+import { createRelay, memoryStore } from "../../../apps/web/lib/relay.js";
 
 const redis = new Redis(process.env.TEST_REDIS_URL ?? "redis://127.0.0.1:6379/13");
 const PASSWORD = "hunter2-correct-horse";
@@ -93,17 +95,18 @@ function scriptedBooking(origin: string): Planner {
   };
 }
 
-function runtime(planner: Planner, clock: () => Date) {
+function runtime(planner: Planner, clock: () => Date, extra: Partial<HostedOptions> = {}) {
   const telegram = new TelegramAdapter("BOT", "tg-secret", fakeFetch);
   const whatsapp = new WhatsAppAdapter({ phoneNumberId: "1", accessToken: "x", appSecret: "app-secret", verifyToken: "v" }, fakeFetch);
   const rt = new HostedRuntime({
-    redis,
+    redis: fromRedis(redis),
     keys: new UserKeys(randomBytes(32)),
     baseUrl: "https://momo.example",
     telegram,
     whatsapp,
     skills: () => [new RemindersSkill(), new WebTaskSkill(planner, browser)],
     now: clock,
+    ...extra,
   });
   return { rt, app: rt.routes() };
 }
@@ -188,6 +191,45 @@ test("new user on Telegram: onboarding, then a web errand done end to end", { ti
     for (const secret of [PASSWORD, "ana@example.com", "\"Ana\"", "Nopa tonight"]) assert.ok(!v.includes(secret), `${k} leaks ${secret}`);
   }
   for (const m of sent) assert.ok(!m.text.includes(PASSWORD));
+});
+
+test("on a person's own computer: the secure link opens on their phone through the Vercel relay, which sees only ciphertext", { timeout: 120_000 }, async () => {
+  const store = memoryStore();
+  const relay = createRelay(store);
+  const RELAY = "https://momo-web.example";
+  const relayFetch = (async (url: string | URL | Request, init?: RequestInit) => relay(new Request(url, init))) as typeof fetch;
+  const token = ((await (await relayFetch(`${RELAY}/api/devices`, { method: "POST" })).json()) as { token: string }).token;
+  // No public address: the server is only reachable on this computer.
+  const { rt, app } = runtime(scriptedBooking(site.origin), () => FRIDAY_NOON, {
+    baseUrl: "http://localhost:8787",
+    relay: { url: RELAY, token, fetch: relayFetch },
+  });
+
+  await tg(app, rt, "hey");
+  await tg(app, rt, "I'm Ana");
+  await tg(app, rt, "San Francisco");
+  // (The shared test restaurant's 7pm slot is booked by the first test.)
+  const linkMsg = await tg(app, rt, "book a table for 2 at Nopa tonight at 9:15pm");
+  const url = /https:\/\/momo-web\.example\/s\/([\w-]+)/.exec(linkMsg);
+  if (!url) throw new Error(`expected a relay link, got:\n${sent.map((m) => m.text).join("\n---\n")}`);
+  const formId = url[1]!;
+
+  // The phone: the static page asks the relay what to show and which key to seal to.
+  const info = (await (await relayFetch(`${RELAY}/api/forms/${formId}`)).json()) as { spec: { kind: string; label: string }; pk: string };
+  assert.equal(info.spec.kind, "login");
+  assert.match(info.spec.label, /127\.0\.0\.1:\d+/);
+  const momoSeal = new Function(`${WEB_SEAL_SOURCE}; return momoSeal;`)() as (k: string, p: string) => Promise<string>;
+  const sealed = await momoSeal(info.pk, JSON.stringify({ formId, fields: { identifier: "ana@example.com", password: PASSWORD } }));
+  assert.equal((await relayFetch(`${RELAY}/api/forms/${formId}`, { method: "POST", body: JSON.stringify({ sealed }) })).status, 200);
+  assert.equal((await relayFetch(`${RELAY}/api/forms/${formId}`, { method: "POST", body: JSON.stringify({ sealed }) })).status, 410, "single use");
+  for (const v of store.dump()) for (const secret of [PASSWORD, "ana@example.com"]) assert.ok(!v.includes(secret), "the relay holds only ciphertext");
+
+  // This computer collects it and the errand carries on.
+  assert.equal(await rt.pollRelay(), 1);
+  await rt.drain();
+  assert.ok(sent.some((m) => m.text === `Saved your ${new URL(site.origin).host} login. Continuing.`));
+  assert.match(sent.at(-1)!.text, /Book Nopa, .*Reply YES/s);
+  assert.equal(await rt.pollRelay(), 0, "collected once");
 });
 
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {

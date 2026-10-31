@@ -59,7 +59,7 @@ function telegramFromEnv(): TelegramRelayConfig | undefined {
  * Telegram webhook, WhatsApp, and the secure links for logins and cards.
  * Without it, Telegram is long-polled and links point at localhost.
  */
-async function hostedFromEnv(redisUrl: string, port: number) {
+async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
@@ -96,7 +96,7 @@ async function hostedFromEnv(redisUrl: string, port: number) {
         : undefined;
   const web = new WebTaskSkill(planner, browser, computers);
   const runtime = new HostedRuntime({
-    redis: new Redis(redisUrl),
+    redis: kv,
     keys: new UserKeys(Buffer.from(master, "base64")),
     baseUrl,
     telegram,
@@ -111,6 +111,8 @@ async function hostedFromEnv(redisUrl: string, port: number) {
     emailDomain: env.MOMO_EMAIL_DOMAIN,
     inboundEmailSecret: env.INBOUND_EMAIL_SECRET,
     singleOwner: desktopMode === "local" || env.MOMO_SINGLE_OWNER === "1",
+    // Set by the setup website: secure links open on any phone through it.
+    relay: env.MOMO_RELAY_URL && env.MOMO_RELAY_TOKEN ? { url: env.MOMO_RELAY_URL, token: env.MOMO_RELAY_TOKEN } : undefined,
     log: (m) => console.error(m),
   });
 
@@ -134,7 +136,8 @@ async function hostedFromEnv(redisUrl: string, port: number) {
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
-      if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set PUBLIC_URL (e.g. a cloudflared tunnel).");
+      if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
+      else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");
       void runtime.run(Number(env.MOMO_WORKERS ?? 8));
       return notes;
     },
@@ -146,20 +149,43 @@ async function hostedFromEnv(redisUrl: string, port: number) {
 }
 
 if (import.meta.main) {
-  const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+  // A server sets REDIS_URL. On a person's own device there's no Redis to
+  // install: Momo keeps its state in one file (~/.momo/store.json).
+  const redisUrl = process.env.REDIS_URL;
   const port = Number(process.env.PORT ?? 8787);
-  const hosted = await hostedFromEnv(redisUrl, port);
-  // The device relay owns the Telegram webhook only when hosted mode is off.
-  const cloud = await createCloud({ redisUrl, telegram: hosted ? undefined : telegramFromEnv() });
-  cloud.scheduler.start();
-  if (hosted) cloud.app.route("/", hosted.runtime.routes());
-  serve({ fetch: cloud.app.fetch, port });
-  console.log(`momo listening on :${port}${hosted ? " (hosted mode)" : ""}`);
+  const { FileKV, fromRedis } = await import("./hosted/kv.ts");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const kv = redisUrl
+    ? fromRedis(new Redis(redisUrl))
+    : new FileKV(join(process.env.MOMO_HOME ?? join(homedir(), ".momo"), "store.json"));
+  const hosted = await hostedFromEnv(kv, port);
+  let app: { fetch: (r: Request) => Response | Promise<Response> };
+  let close = async () => kv.disconnect();
+  if (hosted && !redisUrl) {
+    const { Hono } = await import("hono");
+    const device = new Hono();
+    device.get("/healthz", (c) => c.json({ ok: true }));
+    device.route("/", hosted.runtime.routes());
+    app = device;
+  } else {
+    // The device relay owns the Telegram webhook only when hosted mode is off.
+    const cloud = await createCloud({ redisUrl, telegram: hosted ? undefined : telegramFromEnv() });
+    cloud.scheduler.start();
+    if (hosted) cloud.app.route("/", hosted.runtime.routes());
+    app = cloud.app;
+    close = async () => {
+      await cloud.close();
+      kv.disconnect();
+    };
+  }
+  serve({ fetch: app.fetch, port });
+  console.log(`momo listening on :${port}${hosted ? " (hosted mode)" : ""}${redisUrl ? "" : ` (state in ${process.env.MOMO_HOME ?? "~/.momo"})`}`);
   if (hosted) for (const n of await hosted.start()) console.log(`  ${n}`);
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.on(sig, () => {
       hosted?.stop();
-      void cloud.close().finally(() => process.exit(0));
+      void close().finally(() => process.exit(0));
     });
   }
 }

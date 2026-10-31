@@ -8,3 +8,4 @@ export { UserKeys, userIdFor } from "./hosted/keys.ts";
 export { RedisDoc } from "./hosted/userdocs.ts";
 export { BlandVoice, type VoiceProvider } from "./hosted/phone.ts";
 export { parseInboundEmail, type InboundEmail } from "./hosted/email.ts";
+export { FileKV, type KV } from "./hosted/kv.ts";

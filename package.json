@@ -2,7 +2,7 @@
   "name": "momo",
   "private": true,
   "type": "module",
-  "description": "Privacy-first personal assistant: text it, it gets done \u2014 on your own device.",
+  "description": "Privacy-first personal assistant: text it, it gets done — on your own device.",
   "workspaces": [
     "packages/*"
   ],
@@ -16,7 +16,9 @@
     "agent": "node packages/agent-core/src/cli.ts",
     "eval": "node --env-file-if-exists=.env packages/agent-core/src/eval.ts",
     "setup": "node packages/cloud/src/setup.ts",
-    "start": "node --env-file-if-exists=.env packages/cloud/src/main.ts"
+    "start": "node --env-file-if-exists=.env packages/cloud/src/main.ts",
+    "web": "node apps/web/dev.js",
+    "web:assets": "node packages/cloud/src/webassets.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -44,7 +44,7 @@ the most. Then fix the most common failure and run it again.
 | One errand holds up everyone else | Many errands run at once |
 | Sites block the headless browser | It presents itself as ordinary desktop Chrome |
 | It isn't a website | Momo uses apps on a computer like a person at the screen (agent-desktop): your own computer, or a fresh cloud desktop per errand. Sending, deleting, or anything that can't be undone still needs your YES (tested on a real cloud desktop) |
-| Setting it up | `npm run setup` checks your model key and bot, then `npm start`; no domain needed (tested) |
+| Setting it up | On the Momo website: paste a key, make a bot, download settings, paste one install line. Momo runs on your own computer as a background service, with no Redis or Docker (tested on a clean Linux machine; the Mac launchd and Windows paths are written but not run yet) |
 
 ## Still to do (in order)
 

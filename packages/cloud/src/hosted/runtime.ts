@@ -7,7 +7,7 @@
 // compute is spent only while a task runs.
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import type { Redis } from "ioredis";
+import type { KV } from "./kv.ts";
 import { Hono } from "hono";
 import { openJson, type SecureFormSpec, type SecureFormSubmission } from "@momo/protocol";
 import { createAgent, StaticKeyProvider, type Skill } from "@momo/agent-core";
@@ -42,7 +42,7 @@ type Job =
   | { kind: "tick" };
 
 export interface HostedOptions {
-  redis: Redis;
+  redis: KV;
   keys: UserKeys;
   /** Public base URL, used in secure links. */
   baseUrl: string;
@@ -62,6 +62,13 @@ export interface HostedOptions {
   singleOwner?: boolean;
   /** Phone calls for errands a website can't do. */
   voice?: VoiceProvider;
+  /**
+   * Momo's website on Vercel (apps/web). When this server has no public
+   * address (a person's own computer), secure links go through it: the page
+   * seals in the browser, the relay holds only ciphertext, and this server
+   * collects it.
+   */
+  relay?: { url: string; token: string; fetch?: typeof fetch; pollMs?: number };
   now?: () => Date;
   log?: (m: string) => void;
 }
@@ -131,7 +138,43 @@ export class HostedRuntime {
       }
       waiter.disconnect();
     };
-    await Promise.all(Array.from({ length: Math.max(1, concurrency) }, (_, i) => loop(i === 0)));
+    const relay = async () => {
+      while (this.running && this.o.relay) {
+        try {
+          await this.pollRelay();
+        } catch (e) {
+          this.o.log?.(`relay: ${(e as Error).message}`);
+        }
+        await new Promise((r) => setTimeout(r, this.o.relay?.pollMs ?? 2000));
+      }
+    };
+    await Promise.all([relay(), ...Array.from({ length: Math.max(1, concurrency) }, (_, i) => loop(i === 0))]);
+  }
+
+  /** Collect sealed answers to open secure links from the relay. */
+  async pollRelay(): Promise<number> {
+    if (!this.o.relay) return 0;
+    let got = 0;
+    for (const id of await this.o.redis.zrangebyscore("hosted:relayforms", "-inf", "+inf")) {
+      const uid = await this.o.redis.get(`relayform:${id}`);
+      if (!uid) {
+        await this.o.redis.zrem("hosted:relayforms", id);
+        continue;
+      }
+      const res = await this.relayFetch(`/api/forms/${id}/result`);
+      if (res.status === 410 || res.status === 404) {
+        await this.o.redis.zrem("hosted:relayforms", id);
+        continue;
+      }
+      if (!res.ok) continue;
+      const { sealed } = (await res.json()) as { sealed?: string };
+      if (typeof sealed !== "string" || sealed.length > 16_000) continue;
+      await this.o.redis.zrem("hosted:relayforms", id);
+      await this.o.redis.del(`relayform:${id}`);
+      await this.enqueue(uid, { kind: "secret", sealed });
+      got++;
+    }
+    return got;
   }
 
   stop(): void {
@@ -148,7 +191,7 @@ export class HostedRuntime {
     return due;
   }
 
-  private async step(blockS: number, waiter: Redis = this.o.redis): Promise<boolean> {
+  private async step(blockS: number, waiter: KV = this.o.redis): Promise<boolean> {
     const raw = blockS
       ? await waiter.blmove("hosted:jobs", "hosted:processing", "RIGHT", "LEFT", blockS)
       : await this.o.redis.lmove("hosted:jobs", "hosted:processing", "RIGHT", "LEFT");
@@ -185,7 +228,8 @@ export class HostedRuntime {
       ownerHandles: [route.handle],
       onboarding: "welcome",
       secureLinks: { create: (spec) => this.createLink(uid, spec) },
-      liveViews: { create: async (task, page, reason) => this.createLive(uid, task.id, page as LivePage, reason) },
+      // A live view streams this process's browser, so it needs a public address.
+      liveViews: this.isPublic() ? { create: async (task, page, reason) => this.createLive(uid, task.id, page as LivePage, reason) } : undefined,
       phone: this.o.voice && {
         call: async (task, req) => {
           const token = randomBytes(16).toString("base64url");
@@ -193,7 +237,7 @@ export class HostedRuntime {
           await this.o.voice!.start({ ...req, webhookUrl: `${this.base()}/v1/hosted/calls/${token}` });
         },
       },
-      publicUrl: this.o.baseUrl,
+      publicUrl: this.linkBase(),
       inboxAddress,
       home: { channel: route.channel, threadId: route.handle },
       answer: this.o.answer,
@@ -230,8 +274,33 @@ export class HostedRuntime {
     return this.o.baseUrl.replace(/\/$/, "");
   }
 
+  private isPublic(): boolean {
+    return /^https:\/\//.test(this.o.baseUrl);
+  }
+
+  /** Where links people open on their phone point. */
+  private linkBase(): string {
+    return this.o.relay && !this.isPublic() ? this.o.relay.url.replace(/\/$/, "") : this.base();
+  }
+
+  private relayFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    const r = this.o.relay!;
+    return (r.fetch ?? fetch)(`${r.url.replace(/\/$/, "")}${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${r.token}`, ...(init.headers as Record<string, string>) },
+    });
+  }
+
   private async createLink(uid: string, spec: SecureFormSpec): Promise<{ id: string; url: string }> {
     const id = randomBytes(16).toString("base64url");
+    if (this.o.relay && !this.isPublic()) {
+      const pk = this.o.keys.boxKeys(uid).boxPublicKey;
+      const res = await this.relayFetch("/api/forms", { method: "POST", body: JSON.stringify({ id, spec: { kind: spec.kind, label: spec.label }, pk }) });
+      if (!res.ok) throw new Error(`relay: ${res.status} ${await res.text().catch(() => "")}`.trim());
+      await this.o.redis.set(`relayform:${id}`, uid, "EX", FORM_TTL_S);
+      await this.o.redis.zadd("hosted:relayforms", Date.now() + FORM_TTL_S * 1000, id);
+      return { id, url: `${this.linkBase()}/s/${id}` };
+    }
     await this.o.redis.set(`form:${id}`, JSON.stringify({ uid, spec }), "EX", FORM_TTL_S);
     return { id, url: `${this.base()}/s/${id}` };
   }

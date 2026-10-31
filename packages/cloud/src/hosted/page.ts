@@ -13,7 +13,7 @@ export const PAGE_HEADERS = {
   "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'",
 };
 
-interface Field {
+export interface Field {
   id: string;
   label: string;
   auto: string;
@@ -22,7 +22,7 @@ interface Field {
   optional?: boolean;
 }
 
-function formCopy(spec: SecureFormSpec): { title: string; note: string; fields: Field[] } {
+export function formCopy(spec: SecureFormSpec): { title: string; note: string; fields: Field[] } {
   if (spec.kind === "card") {
     return {
       title: "Add your card",

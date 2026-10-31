@@ -11,6 +11,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
+import { fromRedis } from "../src/hosted/kv.ts";
 import { WEB_SEAL_SOURCE } from "@momo/protocol";
 import { HeadlessBrowser, RemindersSkill, WebTaskSkill, startMockShop, type Block, type Planner, type Turn } from "@momo/agent-core";
 import { HostedRuntime, TelegramAdapter, UserKeys, type HostedOptions, type VoiceProvider } from "../src/index.ts";
@@ -70,7 +71,7 @@ function runtime(planner: Planner, voice?: VoiceProvider, extra: Partial<HostedO
   // One web skill for the process, as in production: the live page survives between messages.
   const web = new WebTaskSkill(planner, browser);
   const rt = new HostedRuntime({
-    redis,
+    redis: fromRedis(redis),
     keys: new UserKeys(randomBytes(32)),
     baseUrl: "https://momo.example",
     telegram: new TelegramAdapter("BOT", "tg-secret", fakeFetch),

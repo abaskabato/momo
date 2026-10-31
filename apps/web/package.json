@@ -1,0 +1,7 @@
+{
+  "name": "momo-web",
+  "private": true,
+  "type": "module",
+  "description": "Momo's website on Vercel: setup in the browser, and a relay for secure links. No dependencies, no build step.",
+  "engines": { "node": ">=20" }
+}
