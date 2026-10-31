@@ -29,6 +29,8 @@ interface LivePage {
   screenshot(o: { type: "jpeg"; quality: number }): Promise<Buffer>;
   viewportSize(): { width: number; height: number } | null;
   mouse: { click(x: number, y: number): Promise<void>; wheel(dx: number, dy: number): Promise<void> };
+  waitForLoadState(state: "domcontentloaded"): Promise<void>;
+  waitForTimeout(ms: number): Promise<void>;
   keyboard: { type(t: string): Promise<void>; press(k: string): Promise<void> };
 }
 
@@ -283,6 +285,9 @@ export class HostedRuntime {
         case "tap":
           if (!(Number(b.x) >= 0 && Number(b.x) <= 1 && Number(b.y) >= 0 && Number(b.y) <= 1)) return c.json({ error: "bad tap" }, 400);
           await v.page.mouse.click(Number(b.x) * size.width, Number(b.y) * size.height);
+          // Let a navigation the tap started land before the next screenshot or "done".
+          await v.page.waitForTimeout(300);
+          await v.page.waitForLoadState("domcontentloaded").catch(() => {});
           break;
         case "type":
           if (b.key && ["Enter", "Tab", "Backspace", "Escape"].includes(b.key)) await v.page.keyboard.press(b.key);

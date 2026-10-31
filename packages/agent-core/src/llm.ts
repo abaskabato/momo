@@ -70,7 +70,8 @@ export function createAnswerer(spec: string, env = process.env, fetchImpl: typeo
 // ---- OpenAI-compatible chat completions ------------------------------------
 
 type ChatMessage =
-  | { role: "system" | "user"; content: string }
+  | { role: "system"; content: string }
+  | { role: "user"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> }
   | { role: "assistant"; content: string | null; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
   | { role: "tool"; tool_call_id: string; content: string };
 
@@ -87,13 +88,25 @@ export function toChatMessages(system: string, history: Turn[]): ChatMessage[] {
         ...(calls.length && { tool_calls: calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.input) } })) }),
       });
     } else {
+      // Tool messages must directly follow their calls; images go in one user message after them.
+      const images: string[] = [];
       for (const b of turn.content) {
         if (b.type === "tool_result") {
           const r = b as Extract<Block, { type: "tool_result" }>;
-          out.push({ role: "tool", tool_call_id: r.tool_use_id, content: r.is_error ? `ERROR: ${r.content}` : r.content });
+          let text: string;
+          if (Array.isArray(r.content)) {
+            text = r.content.map((p) => (p.type === "text" ? p.text : "[image attached below]")).join("\n");
+            for (const p of r.content) if (p.type === "image") images.push(`data:${p.source.media_type};base64,${p.source.data}`);
+          } else {
+            text = r.content;
+          }
+          out.push({ role: "tool", tool_call_id: r.tool_use_id, content: r.is_error ? `ERROR: ${text}` : text });
         } else if (b.type === "text") {
           out.push({ role: "user", content: (b as { text: string }).text });
         }
+      }
+      if (images.length) {
+        out.push({ role: "user", content: [{ type: "text", text: "Screenshot:" }, ...images.map((url) => ({ type: "image_url" as const, image_url: { url } }))] });
       }
     }
   }
