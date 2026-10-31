@@ -1,0 +1,5 @@
+node_modules
+.momo/
+*.log
+.env
+docs/evals/results/

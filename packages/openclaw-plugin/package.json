@@ -1,0 +1,9 @@
+{
+  "name": "@momo/openclaw-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Momo task orchestration for OpenClaw: local vault, confirm-before-commit, thin-cloud check-in.",
+  "dependencies": { "@momo/agent-core": "*", "@momo/protocol": "*" },
+  "openclaw": { "extensions": ["./index.ts"] }
+}

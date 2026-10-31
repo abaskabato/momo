@@ -1,0 +1,22 @@
+[
+  { "id": "opentable-dinner", "text": "book a table for 2 at a well-reviewed Italian restaurant in San Francisco this Friday around 7pm on OpenTable", "expect": "commit", "mustMention": ["2", "7|19"] },
+  { "id": "resy-dinner", "text": "get me a table for 2 on Resy in San Francisco tomorrow at 8pm, anywhere good", "expect": "commit", "mustMention": ["2", "8|20"] },
+  { "id": "restaurant-any", "text": "book dinner for 4 near the Mission in SF on Saturday at 7:30pm", "expect": "commit", "mustMention": ["4"] },
+  { "id": "amazon-batteries", "text": "order a 24-pack of AA batteries from Amazon", "expect": "commit", "mustMention": ["AA"] },
+  { "id": "target-pickup", "text": "order paper towels from Target for pickup at the store nearest 94110", "expect": "commit", "mustMention": ["paper towel"] },
+  { "id": "homedepot-drill", "text": "find a cordless drill under $100 at Home Depot I can pick up today near 94110 and reserve it", "expect": "commit", "mustMention": ["drill"] },
+  { "id": "walgreens-flu", "text": "schedule a flu shot at a Walgreens near 94110 this week", "expect": "commit", "mustMention": ["flu"] },
+  { "id": "cvs-flu", "text": "book a flu shot at CVS near 94110 for next Monday morning", "expect": "commit", "mustMention": ["flu"] },
+  { "id": "zocdoc-dentist", "text": "find me a dentist cleaning appointment in San Francisco next week and book it", "expect": "commit", "mustMention": ["dent|clean"] },
+  { "id": "eventbrite-free", "text": "sign me up for a free tech meetup in San Francisco this month on Eventbrite", "expect": "commit", "mustMention": ["free|\\$0"] },
+  { "id": "recgov-campsite", "text": "reserve a campsite at Big Basin or any state park near SF for 2 nights next month", "expect": "commit", "mustMention": ["night|camp"] },
+  { "id": "kayak-flight", "text": "find the cheapest nonstop flight from SFO to LAX next Friday morning and book it", "expect": "commit", "mustMention": ["SFO|San Francisco", "LAX|Los Angeles"] },
+  { "id": "booking-hotel", "text": "book a hotel in downtown Seattle for next Saturday night under $250", "expect": "commit", "mustMention": ["Seattle"] },
+  { "id": "airbnb-weekend", "text": "find an Airbnb in Lake Tahoe for 4 people two weekends from now under $400 a night and book it", "expect": "commit", "mustMention": ["Tahoe"] },
+  { "id": "ticketmaster", "text": "get 2 tickets to the next Warriors home game, cheapest seats", "expect": "commit", "mustMention": ["Warriors", "2"] },
+  { "id": "amc-movie", "text": "get 2 tickets for the most popular movie tonight at the AMC Metreon around 7pm", "expect": "commit", "mustMention": ["2"] },
+  { "id": "usps-holdmail", "text": "put a USPS hold on my mail from next Monday to Friday", "expect": "commit", "mustMention": ["hold"] },
+  { "id": "dmv-appointment", "text": "make a California DMV appointment to renew my license at the closest office to 94110", "expect": "commit", "mustMention": ["DMV|license"] },
+  { "id": "costco-hours", "text": "what time does the SF Costco close today?", "expect": "answer", "mustMention": ["\\d"] },
+  { "id": "track-package", "text": "track USPS package 9400111899223197428490", "expect": "answer", "mustMention": ["deliver|transit|track|not found|status"] }
+]

@@ -1,0 +1,26 @@
+{
+  "id": "momo",
+  "name": "Momo",
+  "description": "Text it and it's done, on your own machine: task skills, a local credential vault, confirm-before-commit, and a thin cloud for wake-ups.",
+  "categories": ["agent-orchestration"],
+  "activation": { "onStartup": true },
+  "enabledByDefault": false,
+  "skills": ["./skills"],
+  "contracts": { "tools": ["momo_start_task", "momo_tasks", "momo_vault_list"] },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "cloudUrl": { "type": "string", "description": "Coordination cloud base URL. Omit to run local-only." },
+      "deviceId": { "type": "string" },
+      "stateDir": { "type": "string", "description": "Defaults to <plugin state dir>/momo." },
+      "ownerHandles": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Your phone numbers / chat ids. Only these can start tasks or approve." },
+      "tablenowOrigin": { "type": "string" },
+      "headedBrowser": { "type": "boolean", "default": false, "description": "Drive your real browser via agent-desktop instead of a private headless one." }
+    },
+    "required": ["ownerHandles"]
+  },
+  "uiHints": {
+    "ownerHandles": { "label": "Your handles", "help": "Only messages from these can start tasks or say YES." }
+  }
+}

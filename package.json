@@ -1,0 +1,23 @@
+{
+  "name": "momo",
+  "private": true,
+  "type": "module",
+  "description": "Privacy-first personal assistant: text it, it gets done \u2014 on your own device.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test 'packages/*/test/**/*.test.ts'",
+    "cloud": "node packages/cloud/src/main.ts",
+    "agent": "node packages/agent-core/src/cli.ts",
+    "eval": "node packages/agent-core/src/eval.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

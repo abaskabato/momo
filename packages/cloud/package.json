@@ -1,0 +1,16 @@
+{
+  "name": "@momo/cloud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@momo/protocol": "*",
+    "hono": "^4.9.0",
+    "@hono/node-server": "^1.19.0",
+    "ioredis": "^5.7.0",
+    "@momo/agent-core": "*"
+  }
+}
