@@ -1,17 +1,28 @@
 # Momo
 
-Text it and it's done. Your logins never leave your device.
+Text it and it's done.
 
 You text Momo on Telegram or WhatsApp in plain language: "book a table for 4 at
-Nopa Friday at 7", "remind me to call mom tomorrow at 6". Nothing to install.
-It drives a real browser to get it done. Logins come in through a secure link,
-encrypted on your phone, so they never pass through chat. Power users can link
-their own Mac so everything runs there instead. Before anything
-irreversible it texts you the exact terms and waits for `YES <code>`. `STOP`
-cancels everything. `UNDO` reverses the last thing it did.
+Nopa Friday at 7", "order more oat milk", "remind me to call mom at 6". It does
+the errand on websites, and, if you let it, in any app on a computer, like a
+person at the screen (through
+[agent-desktop](https://github.com/vercel-labs/agent-desktop)). Before it buys,
+books, sends or deletes anything, it texts you the exact terms and waits for
+your YES. `STOP` cancels everything. `UNDO` reverses the last thing it did.
 
-See [docs/INSTINCT-SCORECARD.md](docs/INSTINCT-SCORECARD.md) for what's built, what's
-better than Instinct, and what isn't there yet.
+## Quick start
+
+```bash
+npm install
+npm run setup   # model key + Telegram bot token, checked; writes .env
+npm start       # prints your bot's link: text it
+```
+
+Full guide: [docs/SETUP.md](docs/SETUP.md). Every setting: [.env.example](.env.example).
+Docker: `docker compose up -d`.
+
+See [docs/INSTINCT-SCORECARD.md](docs/INSTINCT-SCORECARD.md) for what's built
+and what isn't there yet.
 
 ## How it fits together
 

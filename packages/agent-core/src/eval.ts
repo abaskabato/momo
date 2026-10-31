@@ -16,7 +16,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { HeadlessBrowser } from "./browser.ts";
+import { HeadlessBrowser, type BrowserSessionFactory } from "./browser.ts";
+import type { ComputerFactory } from "./computer.ts";
 import { RecordingOutbound } from "./channels.ts";
 import { createAnswerer, createPlanner, type Answerer } from "./llm.ts";
 import { createAgent } from "./runtime.ts";
@@ -75,7 +76,15 @@ class MemDoc<T> implements Doc<T> {
   }
 }
 
-export async function runErrand(errand: Errand, planner: Planner, browser: HeadlessBrowser, answerer?: Answerer, timeoutMs = 6 * 60_000): Promise<EvalResult> {
+export interface RunOptions {
+  answerer?: Answerer;
+  /** A computer for non-web errands (agent-desktop). */
+  computers?: ComputerFactory;
+  timeoutMs?: number;
+}
+
+export async function runErrand(errand: Errand, planner: Planner, browser: BrowserSessionFactory, o: RunOptions = {}): Promise<EvalResult> {
+  const { answerer, computers, timeoutMs = 6 * 60_000 } = o;
   const t0 = Date.now();
   const tools: string[] = [];
   const counting: Planner = {
@@ -89,7 +98,7 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Headl
   const agent = await createAgent({
     docs: (_n, fallback) => new MemDoc(fallback),
     keyProvider: new StaticKeyProvider(randomBytes(32)),
-    skills: () => [new WebTaskSkill(counting, browser)],
+    skills: () => [new WebTaskSkill(counting, browser, computers)],
     outbound: out,
     ownerHandles: ["eval"],
     onboarding: "done",
@@ -174,7 +183,7 @@ if (import.meta.main) {
   const results: EvalResult[] = [];
   for (const e of errands) {
     process.stdout.write(`${e.id} … `);
-    const r = await runErrand(e, planner, browser, answerer);
+    const r = await runErrand(e, planner, browser, { answerer });
     console.log(`${r.outcome} (${r.seconds}s, ${r.steps} steps)`);
     results.push(r);
   }

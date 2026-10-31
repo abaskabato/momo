@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { serve } from "@hono/node-server";
 import { Redis } from "ioredis";
 import { createApp, type TelegramRelayConfig } from "./app.ts";
@@ -50,31 +51,50 @@ function telegramFromEnv(): TelegramRelayConfig | undefined {
 }
 
 /**
- * Hosted mode (the default product): set MOMO_MASTER_KEY, PUBLIC_URL,
- * MOMO_MODEL (any provider/model) plus that provider's key, and Telegram
- * and/or WhatsApp credentials.
+ * Hosted mode (the default product). `npm run setup` writes the .env this
+ * reads; see docs/SETUP.md. Needs MOMO_MASTER_KEY, a model (MOMO_MODEL plus
+ * that provider's key) and Telegram and/or WhatsApp credentials.
+ *
+ * PUBLIC_URL (an https address that reaches this server) enables the
+ * Telegram webhook, WhatsApp, and the secure links for logins and cards.
+ * Without it, Telegram is long-polled and links point at localhost.
  */
-async function hostedFromEnv(redisUrl: string) {
-  const master = process.env.MOMO_MASTER_KEY;
-  const baseUrl = process.env.PUBLIC_URL;
-  if (!master || !baseUrl) return null;
-  const { createAnswerer, createPlanner, HeadlessBrowser, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+async function hostedFromEnv(redisUrl: string, port: number) {
+  const env = process.env;
+  const master = env.MOMO_MASTER_KEY;
+  if (!master) return null;
+  const { AgentDesktop, createAnswerer, createPlanner, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
   const { BlandVoice } = await import("./hosted/phone.ts");
-  const env = process.env;
-  const telegram = env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET ? new TelegramAdapter(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET) : undefined;
+  const baseUrl = env.PUBLIC_URL || `http://localhost:${port}`;
+  const isPublic = /^https:\/\//.test(baseUrl);
+  const telegram = env.TELEGRAM_BOT_TOKEN
+    ? new TelegramAdapter(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET || randomBytes(16).toString("hex"), fetch, env.TELEGRAM_API_BASE)
+    : undefined;
   const whatsapp =
     env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_VERIFY_TOKEN
       ? new WhatsAppAdapter({ phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID, accessToken: env.WHATSAPP_ACCESS_TOKEN, appSecret: env.WHATSAPP_APP_SECRET, verifyToken: env.WHATSAPP_VERIFY_TOKEN })
       : undefined;
-  const browser = new HeadlessBrowser();
+  if (!telegram && !whatsapp) throw new Error("set TELEGRAM_BOT_TOKEN (or WhatsApp credentials); run `npm run setup`");
+  // MOMO_BROWSER=desktop drives your own Chrome through vercel-labs/agent-desktop
+  // (a computer with a screen, one owner). Default: private headless Chromium per errand.
+  const browser =
+    env.MOMO_BROWSER === "desktop" ? new DesktopBrowser(new AgentDesktop(), env.MOMO_DESKTOP_APP || "Google Chrome") : new HeadlessBrowser({ timezoneId: env.TZ || undefined });
   // Any model: MOMO_MODEL=provider/model (see agent-core/src/llm.ts). Answers can use a cheaper one.
   const model = env.MOMO_MODEL ?? "anthropic/claude-opus-5-5";
   const planner = createPlanner(model);
   const answerer = createAnswerer(env.MOMO_ANSWER_MODEL ?? model);
-  const web = new WebTaskSkill(planner, browser);
+  // MOMO_DESKTOP: "local" = this computer's screen (one owner), "cloud" = a desktop container per errand.
+  const desktopMode = env.MOMO_DESKTOP;
+  const computers =
+    desktopMode === "local"
+      ? new LocalComputer(new AgentDesktop())
+      : desktopMode === "cloud"
+        ? new DockerComputers({ image: env.MOMO_DESKTOP_IMAGE || "momo-desktop" })
+        : undefined;
+  const web = new WebTaskSkill(planner, browser, computers);
   const runtime = new HostedRuntime({
     redis: new Redis(redisUrl),
     keys: new UserKeys(Buffer.from(master, "base64")),
@@ -90,31 +110,56 @@ async function hostedFromEnv(redisUrl: string) {
     // that posts to /v1/hosted/email/<INBOUND_EMAIL_SECRET>.
     emailDomain: env.MOMO_EMAIL_DOMAIN,
     inboundEmailSecret: env.INBOUND_EMAIL_SECRET,
+    singleOwner: desktopMode === "local" || env.MOMO_SINGLE_OWNER === "1",
     log: (m) => console.error(m),
   });
-  if (telegram) {
-    // Point the bot at us; Telegram retries until we return 200.
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setWebhook`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url: `${baseUrl.replace(/\/$/, "")}/v1/hosted/telegram`, secret_token: env.TELEGRAM_WEBHOOK_SECRET, allowed_updates: ["message"] }),
-    });
-  }
-  return runtime;
+
+  const stop = new AbortController();
+  return {
+    runtime,
+    model,
+    baseUrl,
+    async start(): Promise<string[]> {
+      const notes: string[] = [
+        `model: ${model}`,
+        `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : "headless Chromium"}`,
+        `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
+      ];
+      if (desktopMode === "local") notes.push("Private: only the first person to text this Momo can use it.");
+      if (telegram) {
+        const me = await telegram.me();
+        const mode = env.TELEGRAM_MODE || (isPublic ? "webhook" : "polling");
+        if (mode === "webhook") await telegram.setWebhook(`${baseUrl.replace(/\/$/, "")}/v1/hosted/telegram`);
+        else void telegram.poll((m) => runtime.accept(m), stop.signal, (e) => console.error(`telegram poll: ${e.message}`));
+        notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
+      }
+      if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
+      if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set PUBLIC_URL (e.g. a cloudflared tunnel).");
+      void runtime.run(Number(env.MOMO_WORKERS ?? 8));
+      return notes;
+    },
+    stop: () => {
+      stop.abort();
+      runtime.stop();
+    },
+  };
 }
 
 if (import.meta.main) {
   const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
-  const hosted = await hostedFromEnv(redisUrl);
+  const port = Number(process.env.PORT ?? 8787);
+  const hosted = await hostedFromEnv(redisUrl, port);
   // The device relay owns the Telegram webhook only when hosted mode is off.
   const cloud = await createCloud({ redisUrl, telegram: hosted ? undefined : telegramFromEnv() });
   cloud.scheduler.start();
-  if (hosted) {
-    cloud.app.route("/", hosted.routes());
-    // Several errands at once; each user's jobs still run one at a time.
-    void hosted.run(Number(process.env.MOMO_WORKERS ?? 8));
-  }
-  const port = Number(process.env.PORT ?? 8787);
+  if (hosted) cloud.app.route("/", hosted.runtime.routes());
   serve({ fetch: cloud.app.fetch, port });
-  console.log(`momo cloud listening on :${port}${hosted ? " (hosted mode)" : ""}`);
+  console.log(`momo listening on :${port}${hosted ? " (hosted mode)" : ""}`);
+  if (hosted) for (const n of await hosted.start()) console.log(`  ${n}`);
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.on(sig, () => {
+      hosted?.stop();
+      void cloud.close().finally(() => process.exit(0));
+    });
+  }
 }

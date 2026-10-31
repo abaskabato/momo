@@ -14,7 +14,9 @@
     "test": "node --test 'packages/*/test/**/*.test.ts'",
     "cloud": "node packages/cloud/src/main.ts",
     "agent": "node packages/agent-core/src/cli.ts",
-    "eval": "node packages/agent-core/src/eval.ts"
+    "eval": "node --env-file-if-exists=.env packages/agent-core/src/eval.ts",
+    "setup": "node packages/cloud/src/setup.ts",
+    "start": "node --env-file-if-exists=.env packages/cloud/src/main.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

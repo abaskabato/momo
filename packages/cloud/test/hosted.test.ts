@@ -33,7 +33,7 @@ const sent: Array<{ to: string; text: string }> = [];
 const fakeFetch: typeof fetch = async (_url, init) => {
   const b = JSON.parse(String(init!.body));
   sent.push({ to: String(b.chat_id ?? b.to), text: b.text?.body ?? b.text });
-  return new Response("{}", { status: 200 });
+  return new Response(JSON.stringify({ ok: true, result: {} }), { status: 200 });
 };
 
 let site: Awaited<ReturnType<typeof startMockSite>>;

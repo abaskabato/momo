@@ -43,6 +43,8 @@ the most. Then fix the most common failure and run it again.
 | Long errands feel dead | Momo texts "Still on it" |
 | One errand holds up everyone else | Many errands run at once |
 | Sites block the headless browser | It presents itself as ordinary desktop Chrome |
+| It isn't a website | Momo uses apps on a computer like a person at the screen (agent-desktop): your own computer, or a fresh cloud desktop per errand. Sending, deleting, or anything that can't be undone still needs your YES (tested on a real cloud desktop) |
+| Setting it up | `npm run setup` checks your model key and bot, then `npm start`; no domain needed (tested) |
 
 ## Still to do (in order)
 

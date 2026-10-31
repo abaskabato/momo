@@ -23,6 +23,18 @@ export interface AdEnvelope<T = unknown> {
   };
 }
 
+/** One node of an agent-desktop accessibility tree. */
+export interface AdNode {
+  role?: string;
+  name?: string;
+  value?: string;
+  description?: string;
+  ref_id?: string;
+  states?: string[];
+  available_actions?: string[];
+  children?: AdNode[];
+}
+
 export class AgentDesktopError extends Error {
   readonly envelope: AdEnvelope;
   constructor(env: AdEnvelope) {
@@ -37,6 +49,8 @@ export class AgentDesktopError extends Error {
 
 export interface AgentDesktopOptions {
   bin?: string;
+  /** Run through another command, e.g. ["docker", "exec", "<container>"] for a cloud desktop. */
+  prefix?: string[];
   /** Allow physical input (cursor, keys). Off unless the owner opted in. */
   headed?: boolean;
   session?: string;
@@ -56,7 +70,8 @@ export class AgentDesktop {
     if (this.opts.headed) argv.unshift("--headed");
     if (this.opts.session) argv.unshift("--session", this.opts.session);
     return new Promise((resolve, reject) => {
-      execFile(this.opts.bin ?? "agent-desktop", argv, { timeout: this.opts.timeoutMs ?? 60_000, maxBuffer: 32 << 20 }, (err, stdout) => {
+      const [cmd, ...pre] = [...(this.opts.prefix ?? []), this.opts.bin ?? "agent-desktop"];
+      execFile(cmd!, [...pre, ...argv], { timeout: this.opts.timeoutMs ?? 60_000, maxBuffer: 32 << 20 }, (err, stdout) => {
         // Exit codes 1 and 2 still print an envelope; parse before judging.
         let env: AdEnvelope<T>;
         try {
@@ -81,6 +96,43 @@ export class AgentDesktop {
     if (opts.skeleton) a.push("--skeleton");
     if (opts.root) a.push("--root", opts.root);
     return this.run<{ snapshot_id: string; tree: unknown; complete: boolean }>(a);
+  }
+
+  /** The app's accessibility tree; `interactive` keeps only elements that can be acted on. */
+  tree(app: string, interactive = false) {
+    const a = ["snapshot", "--app", app, "--compact"];
+    if (interactive) a.push("-i");
+    return this.run<{ snapshot_id: string; tree: AdNode; complete: boolean }>(a);
+  }
+
+  listApps() {
+    return this.run<{ apps: Array<{ name: string; bundle_id?: string; presentation?: string }> }>(["list-apps"]);
+  }
+
+  launch(app: string) {
+    return this.run<{ app: string; window?: { app_name: string } }>(["launch", app, "--activate"]);
+  }
+
+  type(ref: string, text: string) {
+    return this.run(["type", ref, text]);
+  }
+
+  select(ref: string, value: string) {
+    return this.run(["select", ref, value]);
+  }
+
+  /** A key combo ("return", "cmd+s"). Dangerous combos are refused by agent-desktop; we never pass --force. */
+  press(combo: string, app?: string) {
+    return this.run(["press", combo, ...(app ? ["--app", app] : [])]);
+  }
+
+  scroll(ref: string, direction: "up" | "down" | "left" | "right") {
+    return this.run(["scroll", ref, "--direction", direction]);
+  }
+
+  /** PNG, base64. An app's window, or the whole screen. */
+  screenshot(app?: string) {
+    return this.run<{ data: string; format: string; width: number; height: number }>(["screenshot", ...(app ? ["--app", app] : ["--screen", "0"])]);
   }
 
   find(app: string, role: string, name: string) {

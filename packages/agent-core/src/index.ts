@@ -24,5 +24,6 @@ export * from "./skills/web/agent.ts";
 export * from "./skills/web/claude.ts";
 export * from "./skills/reminders.ts";
 export * from "./llm.ts";
-export { runErrand, report, type Errand, type EvalResult } from "./eval.ts";
+export { runErrand, report, type Errand, type EvalResult, type RunOptions } from "./eval.ts";
 export * from "./inbox.ts";
+export * from "./computer.ts";

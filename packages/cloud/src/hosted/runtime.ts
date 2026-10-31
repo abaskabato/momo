@@ -55,6 +55,11 @@ export interface HostedOptions {
   emailDomain?: string;
   /** Path secret for the inbound-email webhook. */
   inboundEmailSecret?: string;
+  /**
+   * Only the first person to text this Momo can use it (required when it runs
+   * on someone's own computer). Everyone else is told it's private.
+   */
+  singleOwner?: boolean;
   /** Phone calls for errands a website can't do. */
   voice?: VoiceProvider;
   now?: () => Date;
@@ -84,6 +89,14 @@ export class HostedRuntime {
   async accept(m: Inbound): Promise<boolean> {
     const fresh = await this.o.redis.set(`seen:${m.id}`, "1", "EX", DEDUPE_TTL_S, "NX");
     if (!fresh) return false;
+    if (this.o.singleOwner) {
+      const who = `${m.channel}:${m.from}`;
+      await this.o.redis.set("owner:single", who, "NX");
+      if ((await this.o.redis.get("owner:single")) !== who) {
+        await this.adapter(m.channel).send(m.from, "This Momo is private.").catch(() => {});
+        return false;
+      }
+    }
     const uid = userIdFor(m.channel, m.from);
     // Who to reply to, kept encrypted so the routing table holds no phone numbers.
     await this.o.redis.set(`user:${uid}`, this.o.keys.encrypt(uid, "route", JSON.stringify({ channel: m.channel, handle: m.from })));

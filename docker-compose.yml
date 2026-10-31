@@ -1,0 +1,19 @@
+# Momo + Redis. Run `npm run setup` first (it writes .env), then:
+#   docker compose up -d
+#   docker compose logs -f momo     # shows your bot's link
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis-data:/data]
+    restart: unless-stopped
+  momo:
+    build: .
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+    ports: ["8787:8787"]
+    depends_on: [redis]
+    restart: unless-stopped
+volumes:
+  redis-data:
