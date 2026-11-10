@@ -86,6 +86,10 @@ if grep -q '^MOMO_DESKTOP=local' "$DIR/momo.env"; then
   say "Installing agent-desktop (so Momo can use apps on this screen)…"
   npm install --prefix "$DIR/tools" --no-audit --no-fund --no-update-notifier --loglevel=error agent-desktop >/dev/null
   TOOLS_BIN="$DIR/tools/node_modules/.bin:"
+  if [ "$NOS" = darwin ]; then
+    say "macOS needs your permission for Momo to use the screen. Follow the guide, then come back:"
+    "$DIR/tools/node_modules/.bin/agent-desktop" permissions --guide </dev/null || true
+  fi
 fi
 SVC_PATH="$TOOLS_BIN$NODE_BIN:/usr/local/bin:/usr/bin:/bin"
 MAIN="$DIR/app/packages/cloud/src/main.ts"

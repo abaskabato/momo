@@ -76,13 +76,16 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 
 ## Good to know
 
-- **Live view** (Momo shows you a page to tap through a CAPTCHA) needs a
-  public address for the computer (`PUBLIC_URL`, e.g. a cloudflared tunnel).
-  Without one, Momo tells you what to do in the chat instead.
-- **Phone calls** (`BLAND_API_KEY`) need a public address too, for the call
-  result.
+- **Live view** (Momo shows you its browser so you can tap through a CAPTCHA)
+  works everywhere: through the website when the computer has no public
+  address, straight from the server when it has one.
+- **Phone calls** (`BLAND_API_KEY`) and **inbound email**
+  (`MOMO_EMAIL_DOMAIN`) need a server with a public address, because outside
+  services have to call it back. On a personal computer, texted codes and
+  secure links still work; Momo asks you for a code instead of reading it
+  from an inbox.
 - `.env.example` documents every setting.
 - `npm run eval` measures how many real errands get done. It never buys or
-  books: it stops at every "Reply YES".
+  books: it stops at every "Reply YES". It needs a paid model key.
 - `npm test` runs the test suite. Some tests use Redis, and the cloud-computer
   test needs the `momo-desktop` image.

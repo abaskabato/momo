@@ -5,6 +5,12 @@ score. Momo is better than Instinct when it finishes more of what people ask,
 faster, with less back-and-forth. It has not been measured on real sites yet,
 so Momo is **not proven better yet**.
 
+Last attempt: 2026-11-10 with `gemini/gemini-3.5-flash`. Every errand failed
+on the first model call with HTTP 429 "You exceeded your current quota":
+the key is still on Gemini's free tier (about 20 requests a day), and one
+errand needs more than that. The eval needs a paid key for any provider;
+nothing else is in the way.
+
 ## How we measure it
 
 `npm run eval` sends 20 real errands through the real assistant, model and
@@ -34,7 +40,7 @@ the most. Then fix the most common failure and run it again.
 |---|---|
 | Sites email a code or a "confirm your email" link | Momo reads its own inbox (each person gets a Momo email address) and carries on, no question asked |
 | Sites text a sign-in code | Momo asks "what's the code?" and types it in |
-| CAPTCHAs / "are you human" | Momo sends a live view of the page. You tap through that one step on your phone, and Momo carries on |
+| CAPTCHAs / "are you human" | Momo sends a live view of the page. You tap through that one step on your phone, and Momo carries on. Works from your own computer too: the pictures and taps go through the Momo website (tested end to end) |
 | Paying | You add your card once by secure link. Momo fills it in at checkout after your YES |
 | Delivery address | You add it once by secure link. Momo fills it in after that |
 | No website / site broken | Momo tries another site, or phones the business with a voice agent |
@@ -48,8 +54,8 @@ the most. Then fix the most common failure and run it again.
 
 ## Still to do (in order)
 
-1. **Run the eval on real sites** and fix what it finds. This needs an API
-   key for any model (`MOMO_MODEL`).
+1. **Run the eval on real sites** and fix what it finds. This needs a paid
+   API key for any model (`MOMO_MODEL`); see "Last attempt" above.
 2. **Live email:** point a domain at an inbound-email service
    (`MOMO_EMAIL_DOMAIN`) and test with real sites' emails.
 3. **Live phone calls:** set `BLAND_API_KEY` and test real calls. The

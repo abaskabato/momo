@@ -2,24 +2,25 @@
 
 Text it and it's done.
 
-You text Momo on Telegram or WhatsApp in plain language: "book a table for 4 at
-Nopa Friday at 7", "order more oat milk", "remind me to call mom at 6". It does
-the errand on websites, and, if you let it, in any app on a computer, like a
-person at the screen (through
+You text Momo on Telegram (or WhatsApp) in plain language: "book a table for 4
+at Nopa Friday at 7", "order more oat milk", "remind me to call mom at 6". It
+does the errand on websites, and, if you let it, in any app on your computer,
+like a person at the screen (through
 [agent-desktop](https://github.com/vercel-labs/agent-desktop)). Before it buys,
 books, sends or deletes anything, it texts you the exact terms and waits for
 your YES. `STOP` cancels everything. `UNDO` reverses the last thing it did.
 
 ## Quick start
 
-People set Momo up on its website (`apps/web`, deployed on Vercel). It runs
-on their own computer, installed with one line:
+People set Momo up on its website (`apps/web`, deployed on Vercel), then paste
+one line that installs it on their own computer as a background service:
 
 ```bash
-curl -fsSL https://your-momo.vercel.app/install.sh | sh   # Mac, Linux (Windows: install.ps1)
+curl -fsSL https://your-momo.vercel.app/install.sh | sh   # Mac, Linux
+irm https://your-momo.vercel.app/install.ps1 | iex        # Windows
 ```
 
-Or by hand:
+Or by hand, for developers:
 
 ```bash
 npm install
@@ -28,90 +29,77 @@ npm start       # prints your bot's link: text it
 ```
 
 Full guide: [docs/SETUP.md](docs/SETUP.md). Every setting: [.env.example](.env.example).
-For a server shared by many people: `docker compose up -d` (Redis).
+A server shared by many people: `docker compose up -d` (adds Redis).
 
-See [docs/INSTINCT-SCORECARD.md](docs/INSTINCT-SCORECARD.md) for what's built
-and what isn't there yet.
+See [docs/INSTINCT-SCORECARD.md](docs/INSTINCT-SCORECARD.md) for what's built,
+what's measured, and what isn't.
 
 ## How it fits together
 
 ```
- you ──text──▶ iMessage on your Mac ─────────────────────────────┐
- you ──text──▶ Telegram ──▶ thin cloud (seal to device key,       │
-                            Redis queue, wake device) ◀─/checkin──┤ your computer
-                                                                  ▼
-                       OpenClaw + Momo plugin: Assistant → skills → browser
-                       local vault · approvals · tasks · timers · memory
+ you ──text──▶ Telegram ◀──long-poll── Momo on your computer (~/.momo)
+                                        Assistant → skills → private Chromium / agent-desktop
+                                        state file · per-user encryption · approvals · timers
+ your phone ──▶ Momo website (Vercel) ◀──── secure links and live views, sealed end to end
 ```
 
-- **Thin cloud** (`packages/cloud`): Hono + Redis. Stores only sealed envelopes
-  (X25519 + AES-GCM to the device's key) and routing metadata. Devices
-  authenticate with Ed25519-signed requests, so the cloud holds no secrets.
-  `/checkin` long-polls; delivery is leased and redelivered until acked.
-- **Wake-on-demand**: a held long-poll is notified instantly. Otherwise the cloud
-  sends a content-free push to the device's wake URL, or, with no wake path,
-  queues the work and batches it into the next check-in. Deferred jobs wake the
-  device at their due time. The check-in interval tightens toward the next due
-  item, so cloud load tracks work, not idle users.
-- **Local agent** (`packages/agent-core`): the Assistant routes each owner
-  message: control words, then approval replies, then answers to a pending
-  question, then a new task. Skills (`Skill` interface) own one kind of errand
-  end to end.
+- **Momo** (`packages/cloud` + `packages/agent-core`) runs where the person
+  is: their own computer, or one server for many people. It long-polls
+  Telegram, so it needs no public address. State lives in one file
+  (`~/.momo/store.json`) or in Redis on a server. Each user's documents are
+  encrypted with a key derived from `MOMO_MASTER_KEY`.
+- **The website** (`apps/web`) does setup in the browser (keys are checked
+  with the provider directly and written into a downloaded `momo.env`), and
+  relays what needs a public address: secure links for logins and cards
+  (sealed in the phone's browser to that person's Momo; the relay holds only
+  ciphertext for 30 minutes) and live views (screenshots one way, taps the
+  other, so the person can finish a CAPTCHA). Plain JavaScript, no build,
+  Upstash Redis for storage.
+- **Web agent**: a planner tool loop over a private headless Chromium: read the
+  page as text plus numbered elements, click, type, select, scroll, sign in
+  from the vault, enter texted codes, read emailed codes from the person's
+  Momo inbox, fill card and address, hand a step to the person, phone a
+  business, add to calendar, ask, request approval, finish.
+- **Computer use**: with `MOMO_DESKTOP=local` Momo drives apps on the owner's
+  screen through agent-desktop's accessibility tree; with `cloud` it gets a
+  fresh Linux desktop container per errand. Sending, deleting and other
+  irreversible actions still need a YES.
 - **Confirm-before-commit**: approvals are bound to a hash of the exact
-  arguments plus the amount, are single-use, and expire in 15 min. They are
-  parsed by code, so a model, a web page, or an email can't approve.
-- **Vault**: AES-256-GCM, with the key in the macOS Keychain or libsecret.
-  Models see handles and hints only. Values are typed straight into the page,
-  and only on the origin the login is bound to.
-- **Computer use**: Playwright in a private headless Chromium by default, or
-  your real browser launched through
-  [agent-desktop](https://github.com/vercel-labs/agent-desktop) with a CDP
-  hand-off. Native apps are driven through agent-desktop's accessibility refs.
-- **Models**: any model. Set `MOMO_MODEL=provider/model`: `anthropic/claude-opus-5-5`
-  (default), `openai/…`, `gemini/…`, `openrouter/<vendor>/<model>`, `groq/…`,
-  `together/…`, `deepseek/…`, `mistral/…`, `xai/…`, `fireworks/…`, local
-  `ollama/…` or `lmstudio/…`, or `custom/…` for any OpenAI-compatible server
-  (`MOMO_MODEL_BASE_URL`, `MOMO_MODEL_API_KEY`). `MOMO_ANSWER_MODEL` can pick a
-  cheaper model for plain questions. On a device, every frontier call goes through the
-  privacy layer: identifiers become per-request placeholders, the local model
-  can rewrite the query in neutral wording, the answer is rehydrated on the
-  device, and a local receipt records what was sent. Payment and network
-  layers are pluggable (anonymous credits, Tor/relays) and off by default.
-- **OpenClaw** (`packages/openclaw-plugin`): Momo is an OpenClaw plugin. Its
-  `before_dispatch` hook settles control words and approvals before the model
-  runs. Outbound replies use the gateway's `send`. Task notes land in
-  OpenClaw's memory folder.
+  arguments plus the amount, are single-use, and expire in 15 minutes. They
+  are parsed by code, so a model, a web page or an email can't approve.
+- **Secrets**: never in chat. Logins, cards and addresses arrive by secure
+  link, are stored encrypted, and are typed straight into the page; the model
+  sees handles only.
+- **Models**: any. `MOMO_MODEL=provider/model`: `anthropic/…`, `openai/…`,
+  `gemini/…`, `openrouter/<vendor>/<model>`, `groq/…`, `together/…`,
+  `deepseek/…`, `mistral/…`, `xai/…`, `fireworks/…`, local `ollama/…` or
+  `lmstudio/…`, or `custom/…` for any OpenAI-compatible server
+  (`MOMO_MODEL_BASE_URL`, `MOMO_MODEL_API_KEY`). `MOMO_ANSWER_MODEL` can pick
+  a cheaper model for plain questions. Rate limits and overloads are retried.
 
-## Hosted mode (the default product)
+## On a server, for many people
 
 ```bash
 MOMO_MASTER_KEY=$(head -c32 /dev/urandom | base64) \
 PUBLIC_URL=https://your-domain REDIS_URL=redis://... \
 MOMO_MODEL=anthropic/claude-opus-5-5 ANTHROPIC_API_KEY=... \
 TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=$(openssl rand -hex 16) \
-WHATSAPP_PHONE_NUMBER_ID=... WHATSAPP_ACCESS_TOKEN=... WHATSAPP_APP_SECRET=... WHATSAPP_VERIFY_TOKEN=... \
-npm run cloud
+npm start
 ```
 
-The server registers the Telegram webhook on startup. For WhatsApp, point the
-Cloud API webhook at `/v1/hosted/whatsapp`. Each user's data is encrypted with
-a key derived from `MOMO_MASTER_KEY` (use a KMS in production).
+With a public https address the server registers the Telegram webhook itself,
+serves secure links and live views directly (no relay), and can take WhatsApp
+(`/v1/hosted/whatsapp`), phone-call results and inbound email:
 
-Optional:
 - `BLAND_API_KEY`: Momo phones businesses that can't be booked online.
 - `MOMO_EMAIL_DOMAIN` + `INBOUND_EMAIL_SECRET`: every user gets a Momo email
-  address (text "email" to see it). Point the domain's MX at any inbound-email
-  service (Postmark, SendGrid Inbound Parse, Mailgun, a Cloudflare Email
-  Worker) posting to `/v1/hosted/email/<INBOUND_EMAIL_SECRET>`. Emailed codes
-  and "confirm your email" links are then handled without asking the person.
+  address. Point the domain's MX at any inbound-email service (Postmark,
+  SendGrid Inbound Parse, Mailgun, a Cloudflare Email Worker) posting to
+  `/v1/hosted/email/<INBOUND_EMAIL_SECRET>`. Emailed codes and "confirm your
+  email" links are then handled without asking the person.
 - `MOMO_WORKERS` (default 8): how many errands run at once.
-
-What keeps errands moving: emailed codes and links are read from the user's
-Momo inbox; texted codes are asked for and typed in; CAPTCHAs
-go to the person as a live view (`/l/…`) for that one step; card and address
-are added once by secure link and filled at checkout after a YES; failing
-sites fall back to another site or a phone call; bookings come with an
-add-to-calendar link (`/ics`).
+- `MOMO_DESKTOP=cloud` + `docker build -f Dockerfile.desktop -t momo-desktop .`:
+  a desktop per errand.
 
 ## Measure it
 
@@ -119,45 +107,32 @@ add-to-calendar link (`/ics`).
 MOMO_MODEL=anthropic/claude-opus-5-5 ANTHROPIC_API_KEY=... npm run eval
 ```
 
-Runs the real errands in `docs/evals/errands.json` on live sites and writes a
-completion report to `docs/evals/results/`. It stops at every "Reply YES" and
-answers NO, so nothing is bought or booked.
+Runs the 20 real errands in `docs/evals/errands.json` on live sites and writes
+a completion report to `docs/evals/results/`. It stops at every "Reply YES"
+and answers NO, so nothing is bought or booked. It needs a paid model key: a
+free-tier key runs out after the first errand.
 
-## Run it
+## Develop
 
-Requires Node 24+ and Redis.
+Node 24+ (native TypeScript, no build step). Redis only for the server tests.
 
 ```bash
 npm install
-npm test                         # protocol + cloud + agent unit tests + end-to-end slice
+npm run typecheck
+npm test                      # 52 tests: unit, relay, real browser, end-to-end errands
+npm run web                   # the website at http://localhost:3000, relay in memory
+npm run web:assets            # regenerate apps/web/public/form-copy.js after changing the forms
 node packages/agent-core/src/cli.ts demo   # chat with it against a local booking site
 ```
-
-The end-to-end test and the demo need a Chromium for Playwright:
-`npx playwright-core install --only-shell chromium`.
-
-Real setup:
-
-```bash
-REDIS_URL=redis://... TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... npm run cloud
-momo pair https://your-cloud --push https://ntfy.sh/<random-topic>
-momo owner +14155550123 <telegram-chat-id>
-momo vault add-login https://site-you-book-on.com
-momo run                         # or install packages/openclaw-plugin into OpenClaw
-```
-
-OpenClaw: `openclaw plugins install --link ./packages/openclaw-plugin`, then set
-`plugins.entries.momo.config.ownerHandles` (and `cloudUrl`/`deviceId` if you use
-the cloud) in `~/.openclaw/openclaw.json`.
 
 ## Layout
 
 ```
-packages/protocol         wire types, sealed boxes, request signing, device client
-packages/cloud            hosted runtime (Telegram/WhatsApp, per-user encryption, jobs, secure links),
-                          plus the device relay (Redis queue, /checkin, wake)
-packages/agent-core       Assistant, skills, vault, approvals, tasks, timers, privacy, CLI
-packages/openclaw-plugin  OpenClaw adapter (hooks, tools, check-in service, skill)
-skills/                   SKILL.md files for the local model
-docs/                     scorecard
+apps/web                  Website on Vercel: setup page, installers, secure-link and live-view relay
+packages/protocol         Sealed boxes (X25519 + AES-GCM), browser sealing code, shared types
+packages/agent-core       Assistant, skills (web agent, reminders), browser, computer use, vault, eval
+packages/cloud            Momo server: Telegram/WhatsApp, job queue (file or Redis), secure pages, setup wizard
+packages/openclaw-plugin  Optional adapter for running the agent inside OpenClaw
+desktop/, Dockerfile*     Docker images: the server, and a Linux desktop for cloud computer use
+docs/                     SETUP.md, INSTINCT-SCORECARD.md, evals
 ```
