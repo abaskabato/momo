@@ -3,3 +3,5 @@ node_modules
 *.log
 .env
 docs/evals/results/
+.vercel
+.env*
