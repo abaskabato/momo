@@ -46,7 +46,8 @@ export interface HostedOptions {
   keys: UserKeys;
   /** Public base URL, used in secure links. */
   baseUrl: string;
-  telegram?: TelegramAdapter;
+  /** The bot (direct, or the website's shared bot through the relay). */
+  telegram?: ChannelAdapter & Partial<Pick<TelegramAdapter, "parse">>;
   whatsapp?: WhatsAppAdapter;
   skills: () => Skill[];
   /** Answers messages that aren't errands. */
@@ -384,10 +385,10 @@ export class HostedRuntime {
     const app = new Hono();
     const ok = { ok: true };
 
-    if (this.o.telegram) {
+    if (this.o.telegram?.parse) {
       const tg = this.o.telegram;
       app.post("/v1/hosted/telegram", async (c) => {
-        const m = tg.parse(c.req.raw.headers, await c.req.json());
+        const m = tg.parse!(c.req.raw.headers, await c.req.json());
         if (m) await this.accept(m);
         return c.json(ok);
       });

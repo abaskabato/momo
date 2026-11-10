@@ -19,6 +19,11 @@ mkdir -p "$DIR" && chmod 700 "$DIR"
 
 # 1. Settings
 ENV_SRC="${MOMO_ENV:-}"
+if [ -n "${MOMO_ENV_B64:-}" ]; then
+  # The settings came inside the downloaded installer itself.
+  ENV_SRC="$DIR/momo.env.inline"
+  printf '%s' "$MOMO_ENV_B64" | base64 -d > "$ENV_SRC" || die "Couldn't read the settings in this installer."
+fi
 if [ -z "$ENV_SRC" ]; then
   for f in "$HOME/Downloads/momo.env" "$HOME/Downloads/momo (1).env" "./momo.env"; do
     [ -f "$f" ] && ENV_SRC="$f" && break

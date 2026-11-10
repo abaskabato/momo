@@ -65,19 +65,24 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   if (!master) return null;
   const { AgentDesktop, createAnswerer, createPlanner, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
-  const { TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
+  const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
   const { BlandVoice } = await import("./hosted/phone.ts");
   const baseUrl = env.PUBLIC_URL || `http://localhost:${port}`;
   const isPublic = /^https:\/\//.test(baseUrl);
+  // Set by the setup website: secure links and live views open on any phone through it,
+  // and (when the site has a shared bot and model) Telegram and the model go through it too.
+  const relay = env.MOMO_RELAY_URL && env.MOMO_RELAY_TOKEN ? { url: env.MOMO_RELAY_URL, token: env.MOMO_RELAY_TOKEN } : undefined;
   const telegram = env.TELEGRAM_BOT_TOKEN
     ? new TelegramAdapter(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_WEBHOOK_SECRET || randomBytes(16).toString("hex"), fetch, env.TELEGRAM_API_BASE)
-    : undefined;
+    : relay
+      ? new RelayTelegramAdapter(relay.url, relay.token)
+      : undefined;
   const whatsapp =
     env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_VERIFY_TOKEN
       ? new WhatsAppAdapter({ phoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID, accessToken: env.WHATSAPP_ACCESS_TOKEN, appSecret: env.WHATSAPP_APP_SECRET, verifyToken: env.WHATSAPP_VERIFY_TOKEN })
       : undefined;
-  if (!telegram && !whatsapp) throw new Error("set TELEGRAM_BOT_TOKEN (or WhatsApp credentials); run `npm run setup`");
+  if (!telegram && !whatsapp) throw new Error("set TELEGRAM_BOT_TOKEN (or WhatsApp credentials), or set up at your Momo website; run `npm run setup`");
   // MOMO_BROWSER=desktop drives your own Chrome through vercel-labs/agent-desktop
   // (a computer with a screen, one owner). Default: private headless Chromium per errand.
   const browser =
@@ -111,8 +116,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     emailDomain: env.MOMO_EMAIL_DOMAIN,
     inboundEmailSecret: env.INBOUND_EMAIL_SECRET,
     singleOwner: desktopMode === "local" || env.MOMO_SINGLE_OWNER === "1",
-    // Set by the setup website: secure links open on any phone through it.
-    relay: env.MOMO_RELAY_URL && env.MOMO_RELAY_TOKEN ? { url: env.MOMO_RELAY_URL, token: env.MOMO_RELAY_TOKEN } : undefined,
+    relay,
     log: (m) => console.error(m),
   });
 
@@ -128,7 +132,12 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
         `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
       ];
       if (desktopMode === "local") notes.push("Private: only the first person to text this Momo can use it.");
-      if (telegram) {
+      if (telegram instanceof RelayTelegramAdapter) {
+        const me = await telegram.me();
+        void telegram.poll((m) => runtime.accept(m), stop.signal, (e) => console.error(`telegram: ${e.message}`));
+        const link = env.MOMO_PAIR_CODE ? `https://t.me/${me.username}?start=${env.MOMO_PAIR_CODE}` : `https://t.me/${me.username}`;
+        notes.push(`Telegram: tap ${link} (shared bot via ${relay!.url})`);
+      } else if (telegram) {
         const me = await telegram.me();
         const mode = env.TELEGRAM_MODE || (isPublic ? "webhook" : "polling");
         if (mode === "webhook") await telegram.setWebhook(`${baseUrl.replace(/\/$/, "")}/v1/hosted/telegram`);

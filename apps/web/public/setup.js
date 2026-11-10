@@ -1,7 +1,8 @@
-// The setup page. Everything happens in this browser: keys are checked
-// directly with the company that issued them and written into a file you
-// download. The only request to this site is for a relay token, which lets
-// your Momo's secure links (for logins and cards) open on your phone.
+// The setup page. Everything happens in this browser. The site's operator
+// may have pre-filled the AI and a shared Telegram bot on the server; the
+// page only asks for what's missing. Any key typed here is checked with the
+// company that issued it and written into the downloaded installer, never
+// sent to this site.
 const PROVIDERS = [
   { id: "gemini", label: "Google Gemini (free key available)", keyEnv: "GEMINI_API_KEY", model: "gemini-flash-latest", keyUrl: "https://aistudio.google.com/apikey",
     check: (k) => fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(k)}`) },
@@ -19,7 +20,20 @@ const PROVIDERS = [
 const $ = (id) => document.getElementById(id);
 const say = (el, text, cls = "") => { el.textContent = text; el.className = `note ${cls}`; };
 const origin = location.origin;
+const BOT_TOKEN = /^\d+:[\w-]{30,}$/;
 
+// What the operator pre-filled. Without it, the page asks for everything.
+let config = { model: null, bot: null };
+const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.json() : config)).then((c) => (config = c)).catch(() => config).finally(() => {
+  $("s-model").hidden = !!config.model;
+  $("s-bot").hidden = !!config.bot;
+  $("intro-ready").hidden = !(config.model && config.bot);
+  $("intro-manual").hidden = !!(config.model && config.bot);
+  let n = 0;
+  for (const h of document.querySelectorAll("section.step:not([hidden]) h2 .num")) h.textContent = String(++n);
+});
+
+// --- Step: the AI ---------------------------------------------------------
 const provider = $("provider");
 for (const p of PROVIDERS) provider.append(new Option(p.label, p.id));
 const current = () => PROVIDERS.find((p) => p.id === provider.value);
@@ -27,11 +41,11 @@ function showProvider() {
   const p = current();
   $("key-row").hidden = !p.keyEnv;
   $("model").value = p.model;
-  $("model").placeholder = p.model || "the model's name, e.g. from the provider's docs";
+  $("model").placeholder = p.model || "the model's name, from the provider's docs";
   $("key-help").textContent = "";
   if (p.keyUrl) {
     const a = Object.assign(document.createElement("a"), { href: p.keyUrl, target: "_blank", rel: "noopener", textContent: "Get a key here" });
-    $("key-help").append(a, document.createTextNode(p.id === "gemini" ? ". The free tier allows about 20 errands' worth a day; turn on billing for real use." : "."));
+    $("key-help").append(a, document.createTextNode(p.id === "gemini" ? ". The free tier allows about one errand a day; turn on billing for real use." : "."));
   }
   say($("model-status"), "");
 }
@@ -58,80 +72,119 @@ $("check-model").addEventListener("click", async () => {
   if (await checked($("model-status"), () => p.check(key))) say($("model-status"), "The key works.", "ok");
 });
 
+// --- Step: the bot --------------------------------------------------------
+let botName = "";
 $("check-bot").addEventListener("click", async () => {
   const t = $("bot").value.trim();
-  if (!/^\d+:[\w-]{30,}$/.test(t)) return say($("bot-status"), "That doesn't look like a bot token (numbers, a colon, then letters).", "bad");
+  if (!BOT_TOKEN.test(t)) return say($("bot-status"), "That doesn't look like a bot token (numbers, a colon, then letters).", "bad");
   const el = $("bot-status");
-  let name = "";
   const ok = await checked(el, async () => {
     const r = await fetch(`https://api.telegram.org/bot${t}/getMe`);
-    if (r.ok) name = (await r.json()).result?.username ?? "";
+    if (r.ok) botName = (await r.json()).result?.username ?? "";
     return r;
   });
-  if (ok) say(el, `Found your bot: @${name}`, "ok");
-  if (name) $("bot-link").textContent = `t.me/${name}`;
+  if (ok) say(el, `Found your bot: @${botName}`, "ok");
 });
 
+// --- Step: what Momo can use ----------------------------------------------
 $("where").addEventListener("change", () => {
   $("where-note").textContent = $("where").value === "local"
     ? "Momo can also use apps on this computer, like a person at the screen. It asks before sending or deleting anything. Only you can text it."
     : "Momo uses websites in a browser of its own, so it doesn't touch yours.";
 });
 
+// --- Step: download ---------------------------------------------------------
 const b64 = (bytes) => btoa(String.fromCharCode(...bytes));
-
-$("download").addEventListener("click", async () => {
-  const p = current();
-  const key = $("key").value.trim();
-  const model = $("model").value.trim();
-  const bot = $("bot").value.trim();
-  const st = $("get-status");
-  if (p.keyEnv && !key) return say(st, "Step 1: paste your AI key.", "bad");
-  if (!model) return say(st, "Step 1: enter the model's name.", "bad");
-  if (!/^\d+:[\w-]{30,}$/.test(bot)) return say(st, "Step 2: paste your bot token.", "bad");
-  $("download").disabled = true;
-  say(st, "Making your settings…");
-  let relay = "";
-  try {
-    const r = await fetch("/api/devices", { method: "POST" });
-    if (r.ok) relay = (await r.json()).token;
-  } catch {}
-  const lines = [
-    `# Momo settings, made at ${origin} on ${new Date().toISOString().slice(0, 10)}.`,
-    "# Keep this file private: it holds your keys.",
-    `MOMO_MODEL=${p.id}/${model}`,
-    ...(p.keyEnv ? [`${p.keyEnv}=${key}`] : []),
-    `TELEGRAM_BOT_TOKEN=${bot}`,
-    `MOMO_MASTER_KEY=${b64(crypto.getRandomValues(new Uint8Array(32)))}`,
-    "# Only the first person to text the bot (you) can use this Momo.",
-    "MOMO_SINGLE_OWNER=1",
-    ...($("where").value === "local" ? ["MOMO_DESKTOP=local"] : []),
-    ...(relay ? [`MOMO_RELAY_URL=${origin}`, `MOMO_RELAY_TOKEN=${relay}`] : []),
-    "",
-  ];
-  const url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/plain" }));
-  Object.assign(document.createElement("a"), { href: url, download: "momo.env" }).click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-  $("download").disabled = false;
-  say(st, relay ? "Saved momo.env to your Downloads." : "Saved momo.env. (Secure links will only open on this computer: this site's relay didn't answer.)", relay ? "ok" : "");
-  $("install").hidden = false;
-  pickOs(guessOs());
-});
+const b64text = (s) => btoa(unescape(encodeURIComponent(s)));
+const guessOs = () => (/Win/.test(navigator.platform) ? "windows" : /Mac|iP/.test(navigator.platform) ? "mac" : "linux");
+let os = guessOs();
 
 const OS = {
-  mac: { how: "Open Terminal (press ⌘ Space, type Terminal) and paste:", cmd: `curl -fsSL ${origin}/install.sh | sh` },
-  linux: { how: "Open a terminal and paste:", cmd: `curl -fsSL ${origin}/install.sh | sh` },
-  windows: { how: "Open PowerShell (Start menu, type PowerShell) and paste:", cmd: `irm ${origin}/install.ps1 | iex` },
+  mac: { label: "Mac", file: "Install Momo.command", how: "Open the file you just downloaded. If your Mac says it can't be opened, right-click it and choose Open; it's a plain script you can read." },
+  windows: { label: "Windows", file: "Install Momo.cmd", how: "Open the file you just downloaded. If Windows says it protected your PC, choose More info, then Run anyway." },
+  linux: { label: "Linux", file: "install-momo.sh", how: "Run the file you just downloaded in a terminal:  sh ~/Downloads/install-momo.sh" },
 };
-const guessOs = () => (/Win/.test(navigator.platform) ? "windows" : /Mac|iP/.test(navigator.platform) ? "mac" : "linux");
-function pickOs(os) {
-  for (const b of document.querySelectorAll("[data-os]")) b.setAttribute("aria-pressed", String(b.dataset.os === os));
-  $("os-how").textContent = OS[os].how;
-  $("cmd").textContent = OS[os].cmd;
+
+/** One file that carries the settings and runs the installer. */
+function installerFor(which, envText) {
+  const env64 = b64text(envText);
+  if (which === "windows") {
+    return `@echo off\r\ntitle Momo\r\necho Installing Momo. This takes a minute or two.\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command "$env:MOMO_ENV_B64='${env64}'; irm ${origin}/install.ps1 | iex"\r\npause\r\n`;
+  }
+  return `#!/bin/sh\n# Installs Momo on this computer and starts it. Settings are below, encoded; nothing else is in this file.\nMOMO_ENV_B64='${env64}'\nexport MOMO_ENV_B64\ncurl -fsSL ${origin}/install.sh | sh\n${which === "mac" ? 'echo; echo "You can close this window."\n' : ""}`;
+}
+
+async function settings() {
+  const st = $("get-status");
+  const lines = [`# Momo settings, made at ${origin} on ${new Date().toISOString().slice(0, 10)}. Keep private: it holds keys.`];
+  let relay = null;
+  try {
+    const r = await fetch("/api/devices", { method: "POST" });
+    if (r.ok) relay = await r.json();
+  } catch {}
+  if (config.model) {
+    if (!relay) throw new Error("This site isn't answering right now. Try again in a minute.");
+    lines.push(`MOMO_MODEL=custom/${config.model.name}`, `MOMO_MODEL_BASE_URL=${origin}/api/model/v1`, `MOMO_MODEL_API_KEY=${relay.token}`);
+  } else {
+    const p = current();
+    const key = $("key").value.trim();
+    const model = $("model").value.trim();
+    if (p.keyEnv && !key) throw new Error("Paste your AI key first.");
+    if (!model) throw new Error("Enter the model's name.");
+    lines.push(`MOMO_MODEL=${p.id}/${model}`);
+    if (p.keyEnv) lines.push(`${p.keyEnv}=${key}`);
+  }
+  if (config.bot) {
+    if (!relay?.pair) throw new Error("This site isn't answering right now. Try again in a minute.");
+    lines.push(`MOMO_PAIR_CODE=${relay.pair}`);
+  } else {
+    const bot = $("bot").value.trim();
+    if (!BOT_TOKEN.test(bot)) throw new Error("Paste your Telegram bot token first.");
+    lines.push(`TELEGRAM_BOT_TOKEN=${bot}`);
+  }
+  lines.push(`MOMO_MASTER_KEY=${b64(crypto.getRandomValues(new Uint8Array(32)))}`, "MOMO_SINGLE_OWNER=1");
+  if ($("where").value === "local") lines.push("MOMO_DESKTOP=local");
+  if (relay) lines.push(`MOMO_RELAY_URL=${origin}`, `MOMO_RELAY_TOKEN=${relay.token}`);
+  else say(st, "Note: this site's relay didn't answer, so secure links will only open on this computer.");
+  return { text: lines.join("\n") + "\n", relay };
+}
+
+function download(name, content) {
+  const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
+  Object.assign(document.createElement("a"), { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+$("download").addEventListener("click", async () => {
+  await ready;
+  const st = $("get-status");
+  $("download").disabled = true;
+  say(st, "Making your installer…");
+  try {
+    const { text, relay } = await settings();
+    download(OS[os].file, installerFor(os, text));
+    say(st, `Saved ${OS[os].file} to your Downloads.`, "ok");
+    $("after").hidden = false;
+    $("os-how").textContent = OS[os].how;
+    const link = $("bot-link");
+    if (config.bot) {
+      link.textContent = `t.me/${config.bot}`;
+      link.href = `https://t.me/${config.bot}?start=${relay.pair}`;
+    } else {
+      link.textContent = botName ? `t.me/${botName}` : "your bot";
+      link.href = botName ? `https://t.me/${botName}` : "#";
+    }
+  } catch (e) {
+    say(st, e.message, "bad");
+  } finally {
+    $("download").disabled = false;
+  }
+});
+
+function pickOs(which) {
+  os = which;
+  for (const b of document.querySelectorAll("[data-os]")) b.setAttribute("aria-pressed", String(b.dataset.os === which));
+  $("download").textContent = `Download Momo for ${OS[which].label}`;
 }
 for (const b of document.querySelectorAll("[data-os]")) b.addEventListener("click", () => pickOs(b.dataset.os));
-$("copy").addEventListener("click", async () => {
-  await navigator.clipboard.writeText($("cmd").textContent).catch(() => {});
-  $("copy").textContent = "Copied";
-  setTimeout(() => ($("copy").textContent = "Copy"), 1500);
-});
+pickOs(os);

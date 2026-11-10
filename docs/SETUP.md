@@ -1,54 +1,69 @@
 # Set up Momo
 
-When you're done, you text a Telegram bot and Momo does the errand: on
+When you're done, you text Momo on Telegram and it does the errand: on
 websites, and if you want, in any app on your computer, like a person sitting
 at the screen. It always asks before it buys, books, sends or deletes anything.
 
 Momo has two halves:
 
-- **The website** (`apps/web`, on Vercel). People set Momo up there in their
-  browser. It also gives secure links (for logins and cards) a public address,
-  so they open on a phone. It never sees keys or passwords: the setup page
-  checks keys directly with the provider, and secure links are sealed on the
-  phone to the person's own Momo.
+- **The website** (`apps/web`, on Vercel). People get Momo there. It also does
+  the few things that need a public address: it gives secure links and live
+  views a place to open on a phone (holding only ciphertext and pictures), and,
+  if the site's operator has set them up, it provides one shared Telegram bot
+  and one shared AI key so people don't need their own.
 - **Momo itself**, running on each person's own computer (Mac, Linux or
   Windows) as a background service. It needs no Redis or Docker; it keeps its
   state in `~/.momo`.
 
-## For people using Momo
+## For people getting Momo
 
-1. Open your Momo website (for example `https://your-momo.vercel.app`).
-2. Paste an AI key (the page links to where to get a free one), make a
-   Telegram bot with @BotFather, and download your settings (`momo.env`).
-3. Paste the one line the page shows into Terminal (Mac/Linux) or PowerShell
-   (Windows):
+With a site whose operator pre-filled the AI and the bot, it's three steps:
 
-   ```bash
-   curl -fsSL https://your-momo.vercel.app/install.sh | sh      # Mac, Linux
-   irm https://your-momo.vercel.app/install.ps1 | iex           # Windows
-   ```
+1. Open the Momo website and click **Download Momo**.
+2. Open the file it saved (`Install Momo.command` on a Mac, `Install Momo.cmd`
+   on Windows, `install-momo.sh` on Linux). It installs everything into
+   `~/.momo`, including its own Node.js if needed, starts Momo, and sets it to
+   start whenever you log in. A Mac may say the file can't be opened: right-click
+   it and choose Open. Windows may say it protected your PC: More info, Run anyway.
+3. Tap the Telegram link the page shows and say hi.
 
-   It installs everything into `~/.momo` (including its own Node.js if you
-   don't have Node 24+), starts Momo in the background, and sets it to start
-   whenever you log in. Then it prints your bot's link.
-4. Text your bot. Only you can use it: the first person to text it becomes its
-   owner.
+Without a pre-filled site, the page also asks for an AI key (it links to where
+to get one) and a Telegram bot token from @BotFather, checks both in your
+browser, and puts them in the same downloaded file. Nothing you type reaches
+the site.
 
-Leave the computer on, because Momo works while it's awake. Run the same line
-again to update; your saved logins and settings are kept. Logs are in
+Leave the computer on: Momo works while it's awake. Open the installer again
+to update; your saved logins and settings are kept. Logs are in
 `~/.momo/momo.log`.
 
 ## For whoever runs the website (once)
 
-1. Import this repo in Vercel and set **Root Directory** to `apps/web`.
-   There's no build step and no dependencies, and `apps/web/vercel.json`
-   holds the routes and security headers.
-2. In the project's **Storage** tab, add **Upstash Redis** (free tier is
-   fine) and connect it. That sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
-   The relay stores only sealed secure-link answers, each for 30 minutes.
-3. Deploy. Open the site: that's the setup page.
+1. Import this repo in Vercel. Either leave Root Directory at the repo root
+   or set it to `apps/web`; both deploy the site. There's no build step and
+   no dependencies.
+2. In the project's **Storage** tab, add **Upstash Redis** and connect it
+   (`vercel integration add upstash/upstash-kv`). The relay keeps sealed
+   answers, pictures and queued messages there, each for minutes to a day.
+3. Optional but what makes it simple for people: environment variables for
+   the shared parts.
+   - `MOMO_MODEL=provider/model` plus that provider's key (`GEMINI_API_KEY`,
+     `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). Devices then call the model
+     through the site; the key never leaves the server. Use a paid key: a free
+     tier runs out after one errand.
+   - `TELEGRAM_BOT_TOKEN` for one shared bot (make it once with @BotFather).
+     The site points its webhook at itself and routes each chat to the Momo
+     that paired with it. Set `MOMO_PUBLIC_URL` to the site's https address.
+4. Deploy. The site's home page is the download page.
 
-Try it locally without Vercel: `npm run web` (http://localhost:3000).
+Costs: every device polls the site for messages (every 1.5 s during a
+conversation, every 6 s when idle), and each poll is one Upstash command.
+Upstash's free tier covers one or two devices; after that it's about
+$0.20 per 100,000 commands. Model usage is billed to the shared key.
+Anyone who can reach the site can create a device, so the relay rate-limits
+model calls per device and device creation per IP.
+
+Try the site locally without Vercel: `npm run web` (http://localhost:3000).
+Set the same environment variables to try the shared bot and model.
 
 ## Other ways to run Momo
 
@@ -63,15 +78,14 @@ npm start       # prints your bot's link
 
 **On a server for many people:** set `REDIS_URL` and a `PUBLIC_URL` (https),
 or use `docker compose up -d`. With a public address, secure links, live views
-("tap through this one step on your phone") and phone-call results come
-straight to the server, so no relay is needed.
+and phone-call results come straight to the server, so no relay is needed.
 
 Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 
 | Setting | What Momo can do | Who can use it |
 |---|---|---|
 | unset (default) | Anything on websites, in its own private browser | You (or many people, on a server) |
-| `local` | Any app on this computer, via [agent-desktop](https://github.com/vercel-labs/agent-desktop). On a Mac, run `~/.momo/tools/node_modules/.bin/agent-desktop permissions --guide` once to allow accessibility | Only you |
+| `local` | Any app on this computer, via [agent-desktop](https://github.com/vercel-labs/agent-desktop). The installer walks through the Mac accessibility permission | Only you |
 | `cloud` | Any app, in a fresh Linux desktop per errand (`docker build -f Dockerfile.desktop -t momo-desktop .`) | Many people |
 
 ## Good to know

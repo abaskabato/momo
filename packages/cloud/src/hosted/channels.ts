@@ -136,3 +136,64 @@ export class WhatsAppAdapter implements ChannelAdapter {
     if (!res.ok) throw new Error(`whatsapp send ${res.status}`);
   }
 }
+
+/**
+ * The website's shared Telegram bot, reached through the relay: the person
+ * tapped a t.me link instead of making a bot. Messages for this Momo are
+ * queued on the relay; this polls them (quick while a conversation is going,
+ * slower when idle) and sends replies back through it.
+ */
+export class RelayTelegramAdapter implements ChannelAdapter {
+  readonly channel = "telegram" as const;
+  private readonly relayUrl: string;
+  private readonly token: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly pollMs: { active: number; idle: number };
+
+  constructor(relayUrl: string, token: string, fetchImpl: typeof fetch = fetch, pollMs = { active: 1500, idle: 6000 }) {
+    this.relayUrl = relayUrl;
+    this.token = token;
+    this.fetchImpl = fetchImpl;
+    this.pollMs = pollMs;
+  }
+
+  private api(path: string, init: RequestInit = {}): Promise<Response> {
+    return this.fetchImpl(`${this.relayUrl.replace(/\/$/, "")}${path}`, {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${this.token}`, ...(init.headers as Record<string, string>) },
+    });
+  }
+
+  async send(_to: string, text: string): Promise<void> {
+    const r = await this.api("/api/send", { method: "POST", body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error(`relay send: ${r.status} ${((await r.json().catch(() => ({}))) as { error?: string }).error ?? ""}`.trim());
+  }
+
+  /** The shared bot's username, from the relay. */
+  async me(): Promise<{ username: string }> {
+    const r = await this.api("/api/config");
+    const c = (await r.json()) as { bot: string | null; botError?: string };
+    if (!c.bot) throw new Error(c.botError ? `relay: ${c.botError}` : "the website has no shared Telegram bot");
+    return { username: c.bot };
+  }
+
+  async poll(onMessage: (m: Inbound) => Promise<unknown>, signal: AbortSignal, onError?: (e: Error) => void): Promise<void> {
+    let lastSeen = 0;
+    while (!signal.aborted) {
+      try {
+        const r = await this.api("/api/inbox", { signal });
+        if (!r.ok) throw new Error(`relay inbox: ${r.status}`);
+        const { messages } = (await r.json()) as { messages: Array<{ id: string; from: string; text: string; at: number }> };
+        for (const m of messages) {
+          lastSeen = Date.now();
+          await onMessage({ channel: "telegram", from: String(m.from), text: m.text, at: m.at, id: `relay:${m.id}` });
+        }
+      } catch (e) {
+        if (signal.aborted) return;
+        onError?.(e as Error);
+      }
+      const active = Date.now() - lastSeen < 3 * 60_000;
+      await new Promise((r) => setTimeout(r, active ? this.pollMs.active : this.pollMs.idle));
+    }
+  }
+}

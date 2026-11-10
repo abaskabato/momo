@@ -1,18 +1,42 @@
 // Momo's relay on Vercel. A person's Momo runs on their own computer; this
-// relay gives its secure links a public https address so they open on a
-// phone. It only ever holds ciphertext: the page seals what the person types
-// to their own Momo's key in the browser, and only their computer can open it.
+// relay does the few things that need a public address, and lets the site's
+// operator pre-fill the hard parts of setup:
 //
-// Plain JavaScript with no dependencies and no build step. It uses Web
-// standards only (Request, Response, crypto.subtle).
+//   - secure links: the page seals what the person types to their own Momo's
+//     key in the browser; the relay holds only ciphertext for 30 minutes
+//   - live views: screenshots one way, taps the other, while a person finishes
+//     a CAPTCHA in the errand's browser
+//   - one shared Telegram bot (TELEGRAM_BOT_TOKEN on the server): people tap a
+//     link instead of making their own bot; messages are queued per device
+//   - one shared model key (MOMO_MODEL + that provider's key on the server):
+//     devices call the model through here and never hold the key
+//
+// Plain JavaScript with no dependencies and no build step. Web standards only.
 
 const FORM_TTL_S = 30 * 60;
 const LIVE_TTL_S = 30 * 60;
 const SHOT_TTL_S = 20;
+const PAIR_TTL_S = 7 * 24 * 3600;
+const INBOX_TTL_S = 24 * 3600;
 const MAX_SEALED = 16_000;
 const MAX_SHOT = 900_000; // base64 JPEG
+const MAX_TEXT = 4000;
 const ID = /^[\w-]{16,64}$/;
 const KINDS = new Set(["login", "card", "address"]);
+
+/** OpenAI-compatible endpoints, the same table as agent-core's llm.ts (a test keeps them equal). */
+export const MODEL_PROVIDERS = {
+  openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
+  anthropic: { baseUrl: "https://api.anthropic.com/v1", keyEnv: "ANTHROPIC_API_KEY" },
+  gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY" },
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", keyEnv: "GROQ_API_KEY" },
+  together: { baseUrl: "https://api.together.xyz/v1", keyEnv: "TOGETHER_API_KEY" },
+  deepseek: { baseUrl: "https://api.deepseek.com/v1", keyEnv: "DEEPSEEK_API_KEY" },
+  mistral: { baseUrl: "https://api.mistral.ai/v1", keyEnv: "MISTRAL_API_KEY" },
+  xai: { baseUrl: "https://api.x.ai/v1", keyEnv: "XAI_API_KEY" },
+  fireworks: { baseUrl: "https://api.fireworks.ai/inference/v1", keyEnv: "FIREWORKS_API_KEY" },
+};
 
 const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
@@ -40,7 +64,7 @@ export function upstashStore(url, token, f = fetch) {
       await call(["RPUSH", k, v]);
       await call(["EXPIRE", k, ex]);
     },
-    popall: async (k) => (await call(["LPOP", k, 100])) ?? [],
+    popall: async (k, n = 100) => (await call(["LPOP", k, n])) ?? [],
     async incr(k, ex) {
       const n = await call(["INCR", k]);
       if (n === 1) await call(["EXPIRE", k, ex]);
@@ -76,10 +100,13 @@ export function memoryStore() {
       e.v = [...e.v, v];
       m.set(k, e);
     },
-    async popall(k) {
-      const v = live(k)?.v ?? [];
-      m.delete(k);
-      return v;
+    async popall(k, n = 100) {
+      const e = live(k);
+      if (!e) return [];
+      const out = e.v.slice(0, n);
+      e.v = e.v.slice(n);
+      if (!e.v.length) m.delete(k);
+      return out;
     },
     async incr(k, ex) {
       const n = Number(live(k)?.v ?? 0) + 1;
@@ -103,7 +130,7 @@ function ics(q) {
   const start = when(t("s"));
   const end = when(t("e"));
   if (!start || !end) return new Response("bad event", { status: 400 });
-  const text = (v) => v.replace(/[\;,]/g, (m) => `\\${m}`).replace(/[\r\n]+/g, " ");
+  const text = (v) => v.replace(/[\\;,]/g, (m) => `\\${m}`).replace(/[\r\n]+/g, " ");
   const body = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Momo//EN", "BEGIN:VEVENT",
     `UID:${randomToken(8)}@momo`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`,
@@ -113,13 +140,27 @@ function ics(q) {
   return new Response(body, { headers: { "content-type": "text/calendar; charset=utf-8", "content-disposition": "attachment; filename=event.ics" } });
 }
 
+/** What the operator pre-filled on the server, if anything. */
+export function operatorConfig(env) {
+  const spec = env.MOMO_MODEL ?? "";
+  const slash = spec.indexOf("/");
+  const provider = slash > 0 ? MODEL_PROVIDERS[spec.slice(0, slash)] : undefined;
+  const key = provider && env[provider.keyEnv];
+  return {
+    model: provider && key ? { name: spec.slice(slash + 1), baseUrl: env.MOMO_MODEL_BASE_URL || provider.baseUrl, key } : null,
+    botToken: env.TELEGRAM_BOT_TOKEN || null,
+    publicUrl: env.MOMO_PUBLIC_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null),
+  };
+}
+
 /**
  * Routes (Vercel rewrites /api/* and /ics here; see vercel.json):
- *   POST /api/devices                setup page: a token for one person's Momo
+ *   GET  /api/config                 setup page and devices: what the operator pre-filled
+ *   POST /api/devices                setup page: a token for one person's Momo, plus a pairing code
  *   POST /api/forms                  their Momo (Bearer token): open a secure link
  *   GET  /api/forms/:id              the link page: what to ask, which key to seal to
  *   POST /api/forms/:id              the link page: the sealed answer (single use)
- *   GET  /api/forms/:id/result       their Momo (Bearer token): collect the sealed answer
+ *   GET  /api/forms/:id/result       their Momo (Bearer): collect the sealed answer
  *   GET  /ics                        add-to-calendar file
  *
  * Live view (the person taps through a CAPTCHA in the errand's browser):
@@ -130,13 +171,51 @@ function ics(q) {
  *   GET  /api/live/:id               the page: {reason}
  *   GET  /api/live/:id/shot          the page: image/jpeg (204 until the first one)
  *   POST /api/live/:id/act           the page: {type: tap|type|scroll|done, ...}
+ *
+ * Shared Telegram bot (TELEGRAM_BOT_TOKEN on the server):
+ *   POST /api/telegram               Telegram's webhook; "/start <pair>" links a chat to a device
+ *   GET  /api/inbox                  their Momo (Bearer): messages for it since last time
+ *   POST /api/send                   their Momo (Bearer): {text} to its own chat
+ *
+ * Shared model key (MOMO_MODEL + key on the server):
+ *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
  */
-export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } = {}) {
+export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600 } = {}) {
+  const op = operatorConfig(env);
+  const tg = (method, body) =>
+    f(`${env.TELEGRAM_API_BASE || "https://api.telegram.org"}/bot${op.botToken}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+    }).then((r) => r.json());
+  let webhookSecret;
+  const secret = async () => (webhookSecret ??= await sha256(`momo-telegram-webhook:${op.botToken}`));
+
+  /** The bot's username, and its webhook pointed here; both remembered for a day. */
+  async function bot(origin) {
+    if (!op.botToken) return null;
+    const cached = await store.get("tg:me");
+    const hook = `${op.publicUrl || origin}/api/telegram`;
+    if (cached && (await store.get(`tg:hook:${await sha256(hook)}`))) return JSON.parse(cached);
+    const me = await tg("getMe");
+    if (!me.ok) throw new Error(`telegram getMe: ${me.description}`);
+    const info = { username: me.result.username };
+    await store.set("tg:me", JSON.stringify(info), 24 * 3600);
+    const set = await tg("setWebhook", { url: hook, secret_token: await secret(), allowed_updates: ["message"], drop_pending_updates: false });
+    if (!set.ok) throw new Error(`telegram setWebhook: ${set.description}`);
+    await store.set(`tg:hook:${await sha256(hook)}`, "1", 24 * 3600);
+    return info;
+  }
+
   return async function handle(req) {
     const url = new URL(req.url);
     const path = (url.searchParams.get("p") ?? url.pathname.replace(/^\/(api\/)?/, "")).replace(/^\/|\/$/g, "");
     const parts = path.split("/");
     const m = req.method;
+
+    if (path === "ics" && m === "GET") return ics(url.searchParams);
+    if (path === "health") return store ? json({ ok: true }) : json({ ok: false, error: "no storage" }, 503);
+    if (!store) return json({ error: "Add Upstash Redis to this Vercel project (Storage tab), then redeploy." }, 503);
 
     const device = async () => {
       const t = /^Bearer (\S+)$/.exec(req.headers.get("authorization") ?? "")?.[1];
@@ -145,17 +224,95 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
       return (await store.get(`dev:${h}`)) ? h : null;
     };
     const body = async () => req.json().catch(() => ({}));
+    const limited = async (key, max) => (await store.incr(key, 3600)) > max;
 
-    if (path === "ics" && m === "GET") return ics(url.searchParams);
-    if (path === "health") return store ? json({ ok: true }) : json({ ok: false, error: "no storage" }, 503);
-    if (!store) return json({ error: "Add Upstash Redis to this Vercel project (Storage tab), then redeploy." }, 503);
+    if (path === "config" && m === "GET") {
+      let b = null;
+      try {
+        b = await bot(url.origin);
+      } catch (e) {
+        return json({ model: op.model ? { name: op.model.name } : null, bot: null, botError: e.message });
+      }
+      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null });
+    }
 
     if (path === "devices" && m === "POST") {
       const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
-      if ((await store.incr(`rl:dev:${ip}`, 3600)) > devicesPerHour) return json({ error: "too many, try again later" }, 429);
+      if (await limited(`rl:dev:${ip}`, devicesPerHour)) return json({ error: "too many, try again later" }, 429);
       const token = randomToken();
-      await store.set(`dev:${await sha256(token)}`, "1");
-      return json({ token });
+      const dev = await sha256(token);
+      await store.set(`dev:${dev}`, "1");
+      let pair = null;
+      if (op.botToken) {
+        pair = randomToken(9);
+        await store.set(`pair:${pair}`, dev, PAIR_TTL_S);
+      }
+      return json({ token, pair });
+    }
+
+    // --- Shared Telegram bot -------------------------------------------------
+    if (path === "telegram" && m === "POST") {
+      if (!op.botToken) return json({ error: "not found" }, 404);
+      if (req.headers.get("x-telegram-bot-api-secret-token") !== (await secret())) return json({ error: "unauthorized" }, 401);
+      const u = await body();
+      const msg = u.message;
+      if (!msg?.text || (msg.chat?.type && msg.chat.type !== "private")) return json({ ok: true });
+      const chat = String(msg.chat.id);
+      let text = msg.text;
+      const start = /^\/start(?:\s+([\w-]+))?\s*$/.exec(text);
+      if (start?.[1]) {
+        const dev = await store.get(`pair:${start[1]}`);
+        if (dev) {
+          await store.set(`chat:${chat}`, dev);
+          await store.set(`devchat:${dev}`, chat);
+          text = "hi";
+        }
+      }
+      const dev = await store.get(`chat:${chat}`);
+      if (!dev) {
+        const origin = op.publicUrl || url.origin;
+        await tg("sendMessage", { chat_id: chat, text: `This is Momo. To get your own, open ${origin} and follow the steps; it takes a few minutes.` });
+        return json({ ok: true });
+      }
+      await store.rpush(`inbox:${dev}`, JSON.stringify({ id: `tg:${u.update_id}`, from: chat, text: text.slice(0, MAX_TEXT), at: (msg.date ?? Date.now() / 1000) * 1000 }), INBOX_TTL_S);
+      return json({ ok: true });
+    }
+
+    if (path === "inbox" && m === "GET") {
+      const dev = await device();
+      if (!dev) return json({ error: "unauthorized" }, 401);
+      const messages = (await store.popall(`inbox:${dev}`, 50)).map((s) => JSON.parse(s));
+      return json({ messages });
+    }
+
+    if (path === "send" && m === "POST") {
+      const dev = await device();
+      if (!dev) return json({ error: "unauthorized" }, 401);
+      if (!op.botToken) return json({ error: "no shared bot" }, 404);
+      if (await limited(`rl:send:${dev}`, sendsPerHour)) return json({ error: "too many" }, 429);
+      const { text } = await body();
+      const chat = await store.get(`devchat:${dev}`);
+      if (!chat) return json({ error: "not paired" }, 409);
+      if (typeof text !== "string" || !text || text.length > MAX_TEXT) return json({ error: "bad request" }, 400);
+      const r = await tg("sendMessage", { chat_id: chat, text, disable_web_page_preview: true });
+      return r.ok ? json({ ok: true }) : json({ error: r.description ?? "telegram error" }, 502);
+    }
+
+    // --- Shared model key ----------------------------------------------------
+    if (parts[0] === "model" && m === "POST") {
+      const dev = await device();
+      if (!dev) return json({ error: "unauthorized" }, 401);
+      if (!op.model) return json({ error: "no shared model" }, 404);
+      if (parts.slice(1).join("/") !== "v1/chat/completions") return json({ error: "not found" }, 404);
+      if (await limited(`rl:model:${dev}`, modelCallsPerHour)) return json({ error: "too many" }, 429);
+      const b = await body();
+      if (!Array.isArray(b.messages)) return json({ error: "bad request" }, 400);
+      const up = await f(`${op.model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${op.model.key}` },
+        body: JSON.stringify({ ...b, model: op.model.name }),
+      });
+      return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/json", "cache-control": "no-store" } });
     }
 
     if (parts[0] === "live") return live(parts.slice(1));
@@ -165,10 +322,10 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
     if (!id && m === "POST") {
       const dev = await device();
       if (!dev) return json({ error: "unauthorized" }, 401);
-      if ((await store.incr(`rl:forms:${dev}`, 3600)) > formsPerHour) return json({ error: "too many" }, 429);
+      if (await limited(`rl:forms:${dev}`, formsPerHour)) return json({ error: "too many" }, 429);
       const b = await body();
       const ok =
-        typeof b.id === "string" && /^[\w-]{16,64}$/.test(b.id) &&
+        typeof b.id === "string" && ID.test(b.id) &&
         KINDS.has(b.spec?.kind) && typeof b.spec?.label === "string" && b.spec.label.length <= 200 &&
         typeof b.pk === "string" && /^[\w-]{40,64}$/.test(b.pk);
       if (!ok) return json({ error: "bad request" }, 400);
@@ -177,7 +334,7 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
       return json({ ok: true });
     }
 
-    if (!id || !/^[\w-]{16,64}$/.test(id)) return json({ error: "not found" }, 404);
+    if (!id || !ID.test(id)) return json({ error: "not found" }, 404);
 
     if (parts.length === 2 && m === "GET") {
       const raw = await store.get(`form:${id}`);
@@ -218,7 +375,7 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
       if (!id && m === "POST") {
         const dev = await device();
         if (!dev) return json({ error: "unauthorized" }, 401);
-        if ((await store.incr(`rl:forms:${dev}`, 3600)) > formsPerHour) return json({ error: "too many" }, 429);
+        if (await limited(`rl:forms:${dev}`, formsPerHour)) return json({ error: "too many" }, 429);
         const b = await body();
         if (!ID.test(b.id ?? "") || typeof b.reason !== "string" || b.reason.length > 300) return json({ error: "bad request" }, 400);
         if (!(await store.set(`live:${b.id}`, JSON.stringify({ dev, reason: b.reason }), LIVE_TTL_S, true))) return json({ error: "exists" }, 409);

@@ -15,6 +15,11 @@ New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 # 1. Settings
 $EnvFile = Join-Path $Dir "momo.env"
 $Src = $env:MOMO_ENV
+if ($env:MOMO_ENV_B64) {
+  # The settings came inside the downloaded installer itself.
+  $Src = Join-Path $Dir "momo.env.inline"
+  [IO.File]::WriteAllBytes($Src, [Convert]::FromBase64String($env:MOMO_ENV_B64))
+}
 if (-not $Src) {
   $Downloads = Join-Path $env:USERPROFILE "Downloads"
   $Src = Get-ChildItem -Path $Downloads -Filter "momo*.env" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName

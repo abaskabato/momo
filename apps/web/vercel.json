@@ -87,5 +87,10 @@
         }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/relay.js": {
+      "maxDuration": 300
+    }
+  }
 }

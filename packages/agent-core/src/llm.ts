@@ -21,7 +21,7 @@ interface Provider {
   keyEnv?: string;
 }
 
-const PROVIDERS: Record<string, Provider> = {
+export const PROVIDERS: Record<string, Provider> = {
   openai: { baseUrl: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY" },
   gemini: { baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY" },
   openrouter: { baseUrl: "https://openrouter.ai/api/v1", keyEnv: "OPENROUTER_API_KEY" },

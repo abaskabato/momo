@@ -1,6 +1,6 @@
 import { createRelay, storeFromEnv } from "../lib/relay.js";
 
-const handle = createRelay(storeFromEnv(process.env));
+const handle = createRelay(storeFromEnv(process.env), { env: process.env });
 
 export function GET(request) {
   return handle(request);
