@@ -95,6 +95,7 @@ test("relay: on Vercel without storage it says what to add", async () => {
   const res = await createRelay(null)(new Request(`${BASE}/api/devices`, { method: "POST" }));
   assert.equal(res.status, 503);
   assert.match(((await res.json()) as { error: string }).error, /Upstash/);
+  assert.equal((await createRelay(null)(new Request(`${BASE}/ics?t=x&s=2026-11-06T19:00&e=2026-11-06T21:00`))).status, 200, "calendar files need no storage");
 });
 
 test("web: the root of the repo deploys the same site as apps/web", () => {

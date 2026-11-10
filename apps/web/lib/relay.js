@@ -133,7 +133,6 @@ function ics(q) {
  */
 export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } = {}) {
   return async function handle(req) {
-    if (!store) return json({ error: "Add Upstash Redis to this Vercel project (Storage tab), then redeploy." }, 503);
     const url = new URL(req.url);
     const path = (url.searchParams.get("p") ?? url.pathname.replace(/^\/(api\/)?/, "")).replace(/^\/|\/$/g, "");
     const parts = path.split("/");
@@ -147,8 +146,9 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
     };
     const body = async () => req.json().catch(() => ({}));
 
-    if (path === "health") return json({ ok: true });
     if (path === "ics" && m === "GET") return ics(url.searchParams);
+    if (path === "health") return store ? json({ ok: true }) : json({ ok: false, error: "no storage" }, 503);
+    if (!store) return json({ error: "Add Upstash Redis to this Vercel project (Storage tab), then redeploy." }, 503);
 
     if (path === "devices" && m === "POST") {
       const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
