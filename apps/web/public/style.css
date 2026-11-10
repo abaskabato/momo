@@ -1,23 +1,200 @@
-:root{color-scheme:light dark;--bg:#fff;--fg:#111;--mut:#5f6368;--acc:#2b6cb0;--line:#dadce0;--card:#f6f7f9;--ok:#1e7d32;--bad:#b3261e}
-@media (prefers-color-scheme:dark){:root{--bg:#111;--fg:#eee;--mut:#a8abb0;--acc:#63a4ff;--line:#33363b;--card:#1b1d20;--ok:#7bd88f;--bad:#ff8a80}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
-main{max-width:560px;margin:0 auto;padding:32px 16px 64px}
-main.narrow{max-width:420px}
-h1{font-size:26px;line-height:1.2;margin:0 0 8px}
-h2{font-size:19px;margin:0 0 6px}
-p{color:var(--mut);margin:0 0 16px}
-a{color:var(--acc)}
-label{display:block;font-size:14px;margin:14px 0 6px;color:var(--fg)}
-input,select{width:100%;padding:12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:transparent;color:inherit}
-button{width:100%;margin-top:20px;padding:14px;font:inherit;border:0;border-radius:10px;background:var(--acc);color:#fff;cursor:pointer}
-button:disabled{opacity:.6;cursor:default}
-button.quiet{background:transparent;color:var(--acc);border:1px solid var(--line)}
-.step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 16px;margin:18px 0}
-.step[aria-disabled=true]{opacity:.5}
-.num{display:inline-block;width:26px;height:26px;border-radius:50%;background:var(--acc);color:#fff;text-align:center;font-size:15px;line-height:26px;margin-right:8px}
-.note{font-size:14px;color:var(--mut);margin:8px 0 0}
-.ok{color:var(--ok)}.bad{color:var(--bad)}
-pre{white-space:pre-wrap;word-break:break-all;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:12px;font:14px/1.4 ui-monospace,Menlo,Consolas,monospace;margin:10px 0 0}
-.tabs{display:flex;gap:8px;margin-top:12px}.tabs button{margin:0;padding:8px;font-size:15px}
-.tabs button[aria-pressed=false]{background:transparent;color:var(--fg);border:1px solid var(--line)}
+/* Momo's website. One quiet column of large serif prose on white, in the
+   spirit of a well-set letter: no cards, no colored buttons, actions are
+   underlined words. Everything is served from this site. */
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/newsreader.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newsreader";
+  src: url("/fonts/newsreader-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --fg: #1f2322;
+  --mut: #6b6f6e;
+  --line: #d9dbda;
+  --mark: #f6e9e2;   /* the soft smear under a main action */
+  --ok: #2f6b3a;
+  --bad: #a3321f;
+  --serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 16px/1.5 var(--sans);
+  letter-spacing: -0.005em;
+  font-feature-settings: "kern";
+}
+
+header.site {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 24px 20px 0;
+}
+header.site .wordmark {
+  font: 500 22px/1 var(--serif);
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  text-decoration: none;
+}
+header.site nav { display: flex; gap: 20px; font-size: 13px; letter-spacing: -0.01em; }
+header.site nav a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+
+main {
+  max-width: 696px;
+  padding: 72px 20px 48px;
+  margin: 0;
+}
+main.narrow { max-width: 560px; }
+
+h1, h2, p.lede, .prose, label, input, select, button, .step p {
+  font-family: var(--serif);
+}
+h1 {
+  font-size: 24px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 22px;
+}
+p.lede, .prose p {
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 0 0 22px;
+  color: var(--fg);
+}
+p.lede em { font-style: italic; }
+.prose a, p.lede a {
+  color: var(--fg);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-decoration-color: #9a9d9c;
+}
+
+/* A step: a serif heading like a sentence, a short note, then plain fields. */
+section.step {
+  margin: 48px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+section.step h2 {
+  font-size: 24px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+}
+section.step h2 .num { color: var(--mut); font-weight: 400; margin-right: 10px; }
+section.step p, p.note {
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--mut);
+  margin: 0 0 14px;
+}
+p.note a, section.step p a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+p.note b, section.step p b { color: var(--fg); font-weight: 600; }
+
+label {
+  display: block;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--mut);
+  margin: 18px 0 4px;
+}
+input, select {
+  width: 100%;
+  padding: 10px 0;
+  font: 400 20px/1.3 var(--serif);
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+input::placeholder { color: #b5b8b7; }
+input:focus, select:focus { border-bottom-color: var(--fg); }
+select { background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%231f2322' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right center; padding-right: 28px; }
+
+/* Actions are words. The main one carries a soft smear, like a highlighter. */
+button {
+  display: inline-block;
+  width: auto;
+  margin: 18px 0 0;
+  padding: 0 2px;
+  font: 400 24px/1.3 var(--serif);
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  background: linear-gradient(transparent 58%, var(--mark) 58%, var(--mark) 92%, transparent 92%);
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-decoration-color: #9a9d9c;
+}
+button::after { content: " ›"; color: var(--fg); }
+button.quiet { background: none; font-size: 17px; }
+button.quiet::after { content: ""; }
+button:disabled { color: var(--mut); cursor: default; text-decoration-color: var(--line); }
+button + button { margin-left: 18px; }
+
+p.note.ok, .ok { color: var(--ok); }
+p.note.bad, .bad { color: var(--bad); }
+p[role=status]:empty { display: none; }
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #f7f7f6;
+  border: 0;
+  border-radius: 0;
+  padding: 14px 16px;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg);
+  margin: 12px 0 0;
+}
+.tabs { display: flex; gap: 18px; margin-top: 14px; }
+.tabs button { margin: 0; font-size: 17px; background: none; }
+.tabs button::after { content: ""; }
+.tabs button[aria-pressed=true] { background: linear-gradient(transparent 58%, var(--mark) 58%, var(--mark) 92%, transparent 92%); }
+.tabs button[aria-pressed=false] { text-decoration-color: var(--line); color: var(--mut); }
+
+footer.legal {
+  padding: 48px 20px 32px;
+  font-size: 13px;
+  color: var(--mut);
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+footer.legal a { color: var(--mut); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+
+@media (max-width: 480px) {
+  main { padding-top: 48px; }
+  h1, p.lede, .prose p, section.step h2, button { font-size: 22px; }
+}
