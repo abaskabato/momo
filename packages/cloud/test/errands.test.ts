@@ -15,6 +15,7 @@ import { fromRedis } from "../src/hosted/kv.ts";
 import { WEB_SEAL_SOURCE } from "@momo/protocol";
 import { HeadlessBrowser, RemindersSkill, WebTaskSkill, startMockShop, type Block, type Planner, type Turn } from "@momo/agent-core";
 import { HostedRuntime, TelegramAdapter, UserKeys, type HostedOptions, type VoiceProvider } from "../src/index.ts";
+import { createRelay, memoryStore } from "../../../apps/web/lib/relay.js";
 
 const redis = new Redis(process.env.TEST_REDIS_URL_ERRANDS ?? "redis://127.0.0.1:6379/12");
 const PASSWORD = "hunter2-correct-horse";
@@ -94,22 +95,102 @@ async function tg(app: ReturnType<HostedRuntime["routes"]>, rt: HostedRuntime, t
   return sent.at(-1)!.text;
 }
 
-/** What the person does on their phone: open the secure link and fill it in. */
-async function fillSecureLink(app: ReturnType<HostedRuntime["routes"]>, rt: HostedRuntime, msg: string, fields: Record<string, string>, title: RegExp) {
-  const url = /https:\/\/momo\.example(\/s\/[\w-]+)/.exec(msg)?.[1];
-  if (!url) throw new Error(`expected a secure link in: ${msg}`);
-  const html = await (await app.request(url)).text();
-  assert.match(html, title);
-  for (const name of Object.keys(fields)) assert.match(html, new RegExp(`name="${name}"`), `form has ${name}`);
-  const boxKey = /momoSeal\("([\w-]+)"/.exec(html)![1]!;
-  const momoSeal = new Function(`${WEB_SEAL_SOURCE}; return momoSeal;`)() as (k: string, p: string) => Promise<string>;
-  const sealed = await momoSeal(boxKey, JSON.stringify({ formId: url.split("/").pop(), fields }));
-  const res = await app.request(url.replace("/s/", "/v1/forms/"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sealed }) });
-  assert.equal(res.status, 200);
-  await rt.drain();
+const momoSeal = new Function(`${WEB_SEAL_SOURCE}; return momoSeal;`)() as (k: string, p: string) => Promise<string>;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** What the person does on their phone: fill in a secure link; tap through a live view. */
+interface Phone {
+  fillLink(msg: string, fields: Record<string, string>, title: RegExp): Promise<void>;
+  live(msg: string): Promise<void>;
+  /** Everything the relay ever stored (empty for a direct connection). */
+  stored(): string[];
 }
 
-test("shopping errand: texted code, human check via live view, address and card added once, then done", { timeout: 120_000 }, async () => {
+/** The server has a public address: links and live views come straight from it. */
+function directPhone(app: ReturnType<HostedRuntime["routes"]>, rt: HostedRuntime): Phone {
+  return {
+    async fillLink(msg, fields, title) {
+      const url = /https:\/\/momo\.example(\/s\/[\w-]+)/.exec(msg)?.[1];
+      if (!url) throw new Error(`expected a secure link in: ${msg}`);
+      const html = await (await app.request(url)).text();
+      assert.match(html, title);
+      for (const name of Object.keys(fields)) assert.match(html, new RegExp(`name="${name}"`), `form has ${name}`);
+      const boxKey = /momoSeal\("([\w-]+)"/.exec(html)![1]!;
+      const sealed = await momoSeal(boxKey, JSON.stringify({ formId: url.split("/").pop(), fields }));
+      const res = await app.request(url.replace("/s/", "/v1/forms/"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sealed }) });
+      assert.equal(res.status, 200);
+      await rt.drain();
+    },
+    async live(msg) {
+      const live = /https:\/\/momo\.example(\/l\/[\w-]+)/.exec(msg)![1]!;
+      assert.match(await (await app.request(live)).text(), /Tap the picture to click/);
+      const shot = await app.request(`${live}/shot`);
+      assert.equal(shot.headers.get("content-type"), "image/jpeg");
+      assert.ok((await shot.arrayBuffer()).byteLength > 1000);
+      const post = (p: string, b: unknown = {}) => app.request(`${live}${p}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+      assert.equal((await post("/tap", { x: 0.5, y: 0.25 })).status, 200);
+      assert.equal((await post("/done")).status, 200);
+      assert.equal((await app.request(`${live}/shot`)).status, 410, "live view ends when they're done");
+      await rt.drain();
+    },
+    stored: () => [],
+  };
+}
+
+/** Momo on the person's own computer (no public address): everything goes through the website's relay. */
+function relayPhone() {
+  const store = memoryStore();
+  const relay = createRelay(store);
+  const RELAY = "https://momo-web.example";
+  const relayFetch = (async (url: string | URL | Request, init?: RequestInit) => relay(new Request(url, init))) as typeof fetch;
+  const api = (path: string, init?: RequestInit) => relayFetch(`${RELAY}${path}`, { ...init, headers: { "content-type": "application/json" } });
+  let rt: HostedRuntime;
+  const phone: Phone = {
+    async fillLink(msg, fields, title) {
+      const id = /https:\/\/momo-web\.example\/s\/([\w-]+)/.exec(msg)?.[1];
+      if (!id) throw new Error(`expected a relay link in: ${msg}`);
+      const info = (await (await api(`/api/forms/${id}`)).json()) as { spec: { kind: string; label: string }; pk: string };
+      assert.match(`Add your ${info.spec.kind === "login" ? `${info.spec.label} login` : info.spec.kind}`, title);
+      const sealed = await momoSeal(info.pk, JSON.stringify({ formId: id, fields }));
+      assert.equal((await api(`/api/forms/${id}`, { method: "POST", body: JSON.stringify({ sealed }) })).status, 200);
+      assert.equal(await rt.pollRelay(), 1);
+      await rt.drain();
+    },
+    async live(msg) {
+      const id = /https:\/\/momo-web\.example\/l\/([\w-]+)/.exec(msg)![1]!;
+      assert.match(((await (await api(`/api/live/${id}`)).json()) as { reason: string }).reason, /check you're a person/);
+      let shot: Response | undefined;
+      for (let i = 0; i < 100 && shot?.status !== 200; i++) {
+        await sleep(50);
+        shot = await api(`/api/live/${id}/shot`);
+      }
+      assert.equal(shot!.headers.get("content-type"), "image/jpeg", "the computer streams screenshots through the relay");
+      assert.ok((await shot!.arrayBuffer()).byteLength > 1000);
+      const act = (b: unknown) => api(`/api/live/${id}/act`, { method: "POST", body: JSON.stringify(b) });
+      assert.equal((await act({ type: "tap", x: 0.5, y: 0.25 })).status, 200);
+      assert.equal((await act({ type: "done" })).status, 200);
+      assert.equal((await api(`/api/live/${id}/shot`)).status, 410, "the phone's view ends on done");
+      // The computer picks "done" up on its next pass and carries on.
+      const before = sent.length;
+      for (let i = 0; i < 100 && sent.length === before; i++) {
+        await sleep(50);
+        await rt.drain();
+      }
+    },
+    stored: () => store.dump(),
+  };
+  return {
+    phone,
+    async token() {
+      return ((await (await api("/api/devices", { method: "POST" })).json()) as { token: string }).token;
+    },
+    extra: (token: string): Partial<HostedOptions> => ({ baseUrl: "http://localhost:8787", relay: { url: RELAY, token, fetch: relayFetch, pollMs: 50 } }),
+    attach: (r: HostedRuntime) => (rt = r),
+  };
+}
+
+for (const via of ["a public address", "the website's relay (Momo on the person's own computer)"] as const) {
+test(`shopping errand via ${via}: texted code, human check via live view, address and card added once, then done`, { timeout: 120_000 }, async () => {
   const { planner, histories } = scripted(`${shop.origin}/`, (prev, r, snap) => {
     switch (prev.name) {
       case "goto":
@@ -161,11 +242,15 @@ test("shopping errand: texted code, human check via live view, address and card 
     }
     throw new Error(`planner: unexpected state after ${prev.name}: ${r.slice(0, 300)}`);
   });
-  const { rt, app } = runtime(planner);
+  const relay = via.startsWith("a public") ? undefined : relayPhone();
+  const { rt, app } = runtime(planner, undefined, relay ? relay.extra(await relay.token()) : {});
+  relay?.attach(rt);
+  const phone = relay ? relay.phone : directPhone(app, rt);
+  const orders0 = shop.state.orders.length;
 
   // 1. The errand starts; the store needs a login Momo doesn't have yet.
   await tg(app, rt, "order me oat milk from ShopNow");
-  await fillSecureLink(app, rt, sent.at(-1)!.text, { identifier: "ana@example.com", password: PASSWORD }, /Add your 127\.0\.0\.1:\d+ login/);
+  await phone.fillLink(sent.at(-1)!.text, { identifier: "ana@example.com", password: PASSWORD }, /Add your 127\.0\.0\.1:\d+ login/);
 
   // 2. The store texts the person a code; Momo asks for it and types it in.
   assert.equal(sent.at(-1)!.text, "ShopNow texted you a code. What is it?");
@@ -173,42 +258,37 @@ test("shopping errand: texted code, human check via live view, address and card 
 
   // 3. A "verify you're human" page: the person does that one step in a live view.
   assert.match(liveMsg, /ShopNow wants to check you're a person\. .*I'm done/s);
-  const live = /https:\/\/momo\.example(\/l\/[\w-]+)/.exec(liveMsg)![1]!;
-  assert.match(await (await app.request(live)).text(), /Tap the picture to click/);
-  const shot = await app.request(`${live}/shot`);
-  assert.equal(shot.headers.get("content-type"), "image/jpeg");
-  assert.ok((await shot.arrayBuffer()).byteLength > 1000);
-  const post = (p: string, b: unknown = {}) => app.request(`${live}${p}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
-  assert.equal((await post("/tap", { x: 0.5, y: 0.25 })).status, 200);
-  assert.equal((await post("/done")).status, 200);
-  assert.equal((await app.request(`${live}/shot`)).status, 410, "live view ends when they're done");
-  await rt.drain();
+  await phone.live(liveMsg);
 
   // 4. Delivery address: asked for once, by secure link.
-  await fillSecureLink(app, rt, sent.at(-1)!.text, { name: "Ana Lopez", line1: "1 Main St", line2: "", city: "San Francisco", region: "CA", postal: "94110", phone: "" }, /Add your address/);
+  await phone.fillLink(sent.at(-1)!.text, { name: "Ana Lopez", line1: "1 Main St", line2: "", city: "San Francisco", region: "CA", postal: "94110", phone: "" }, /Add your address/);
 
   // 5. Approval before paying, then the card (also once, by secure link).
   assert.match(sent.at(-1)!.text, /Order Oat milk 6-pack from ShopNow, \$18\.00.*Reply YES/s);
-  assert.equal(shop.state.orders.length, 0);
+  assert.equal(shop.state.orders.length, orders0);
   const cardMsg = await tg(app, rt, "yes");
   assert.match(cardMsg, /add the card/);
-  await fillSecureLink(app, rt, cardMsg, { name: "Ana Lopez", number: "4242 4242 4242 4242", exp: "07/29", cvc: "123", zip: "94110" }, /Add your card/);
+  await phone.fillLink(cardMsg, { name: "Ana Lopez", number: "4242 4242 4242 4242", exp: "07/29", cvc: "123", zip: "94110" }, /Add your card/);
 
   // Done: the order went through with the right details.
   assert.match(sent.at(-1)!.text, /^Ordered: Oat milk 6-pack, \$18\.00, arrives Thursday\. Order SN-[A-F0-9]+\.$/);
-  assert.equal(shop.state.orders.length, 1);
-  assert.deepEqual(shop.state.orders[0]!.address, { name: "Ana Lopez", street: "1 Main St", city: "San Francisco", state: "CA", zip: "94110" });
-  assert.deepEqual(shop.state.orders[0]!.card, { number: CARD, mm: "07", yy: "2029", cvc: "123" });
+  assert.equal(shop.state.orders.length, orders0 + 1);
+  assert.deepEqual(shop.state.orders.at(-1)!.address, { name: "Ana Lopez", street: "1 Main St", city: "San Francisco", state: "CA", zip: "94110" });
+  assert.deepEqual(shop.state.orders.at(-1)!.card, { number: CARD, mm: "07", yy: "2029", cvc: "123" });
 
   // The model and the chat never saw the card number or password.
   for (const h of histories) assert.ok(!JSON.stringify(h).includes(CARD) && !JSON.stringify(h).includes(PASSWORD));
   for (const m of sent) assert.ok(!m.text.replace(/\s/g, "").includes(CARD) && !m.text.includes(PASSWORD));
+  // Nor did the website: it relayed only sealed answers and pictures.
+  for (const v of phone.stored()) for (const secret of [PASSWORD, CARD, "4242 4242", shop.state.lastCode!]) assert.ok(!v.includes(secret), `relay stored ${secret}`);
 
   // Next time: everything is saved, so a repeat order needs no links.
   const before = sent.length;
   await tg(app, rt, "order me oat milk from ShopNow again");
   assert.ok(!sent.slice(before).some((m) => /\/s\//.test(m.text)), "no secure links the second time");
+  rt.stop();
 });
+}
 
 test("no online booking: Momo phones the restaurant, then adds it to the calendar", { timeout: 60_000 }, async () => {
   const calls: Array<{ to: string; goal: string; webhookUrl: string }> = [];

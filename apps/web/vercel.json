@@ -15,6 +15,10 @@
     {
       "source": "/s/:id",
       "destination": "/s.html"
+    },
+    {
+      "source": "/l/:id",
+      "destination": "/l.html"
     }
   ],
   "headers": [
@@ -67,6 +71,19 @@
         {
           "key": "cache-control",
           "value": "no-cache"
+        }
+      ]
+    },
+    {
+      "source": "/l/(.*)",
+      "headers": [
+        {
+          "key": "cache-control",
+          "value": "no-store"
+        },
+        {
+          "key": "content-security-policy",
+          "value": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; form-action 'none'"
         }
       ]
     }

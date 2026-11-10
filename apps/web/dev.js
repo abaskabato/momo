@@ -25,7 +25,7 @@ export function startDev(port = 3000, relay = createRelay(memoryStore())) {
       res.writeHead(r.status, Object.fromEntries(r.headers)).end(Buffer.from(await r.arrayBuffer()));
       return;
     }
-    const file = url.pathname === "/" ? "index.html" : /^\/s\/[\w-]+$/.test(url.pathname) ? "s.html" : normalize(url.pathname).replace(/^[/\\]+/, "");
+    const file = url.pathname === "/" ? "index.html" : /^\/s\/[\w-]+$/.test(url.pathname) ? "s.html" : /^\/l\/[\w-]+$/.test(url.pathname) ? "l.html" : normalize(url.pathname).replace(/^[/\\]+/, "");
     try {
       const data = await readFile(join(PUBLIC, file));
       res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", ...vercelHeaders(url.pathname) }).end(data);

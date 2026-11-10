@@ -1,0 +1,7 @@
+# Only the website (apps/web) deploys to Vercel; Momo itself runs on people's computers.
+packages
+docs
+desktop
+node_modules
+Dockerfile*
+docker-compose.yml

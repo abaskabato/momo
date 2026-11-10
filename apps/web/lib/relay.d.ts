@@ -4,6 +4,8 @@ export interface RelayStore {
   getdel(k: string): Promise<string | null>;
   del(k: string): Promise<unknown>;
   incr(k: string, ex: number): Promise<number>;
+  rpush(k: string, v: string, ex: number): Promise<void>;
+  popall(k: string): Promise<string[]>;
 }
 export function upstashStore(url: string, token: string, f?: typeof fetch): RelayStore;
 export function memoryStore(): RelayStore & { dump(): string[] };

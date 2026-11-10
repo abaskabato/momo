@@ -7,7 +7,11 @@
 // standards only (Request, Response, crypto.subtle).
 
 const FORM_TTL_S = 30 * 60;
+const LIVE_TTL_S = 30 * 60;
+const SHOT_TTL_S = 20;
 const MAX_SEALED = 16_000;
+const MAX_SHOT = 900_000; // base64 JPEG
+const ID = /^[\w-]{16,64}$/;
 const KINDS = new Set(["login", "card", "address"]);
 
 const json = (body, status = 200, headers = {}) =>
@@ -32,6 +36,11 @@ export function upstashStore(url, token, f = fetch) {
     set: async (k, v, ex, nx) => (await call(["SET", k, v, ...(ex ? ["EX", ex] : []), ...(nx ? ["NX"] : [])])) === "OK",
     getdel: (k) => call(["GETDEL", k]),
     del: (k) => call(["DEL", k]),
+    async rpush(k, v, ex) {
+      await call(["RPUSH", k, v]);
+      await call(["EXPIRE", k, ex]);
+    },
+    popall: async (k) => (await call(["LPOP", k, 100])) ?? [],
     async incr(k, ex) {
       const n = await call(["INCR", k]);
       if (n === 1) await call(["EXPIRE", k, ex]);
@@ -49,7 +58,7 @@ export function memoryStore() {
     return m.get(k);
   };
   return {
-    dump: () => [...m.values()].map((e) => e.v),
+    dump: () => [...m.values()].map((e) => JSON.stringify(e.v)),
     get: async (k) => live(k)?.v ?? null,
     async set(k, v, ex, nx) {
       if (nx && live(k)) return false;
@@ -62,6 +71,16 @@ export function memoryStore() {
       return v;
     },
     del: async (k) => void m.delete(k),
+    async rpush(k, v, ex) {
+      const e = live(k) ?? { v: [], exp: Date.now() + ex * 1000 };
+      e.v = [...e.v, v];
+      m.set(k, e);
+    },
+    async popall(k) {
+      const v = live(k)?.v ?? [];
+      m.delete(k);
+      return v;
+    },
     async incr(k, ex) {
       const n = Number(live(k)?.v ?? 0) + 1;
       m.set(k, { v: String(n), exp: live(k)?.exp || Date.now() + ex * 1000 });
@@ -102,6 +121,15 @@ function ics(q) {
  *   POST /api/forms/:id              the link page: the sealed answer (single use)
  *   GET  /api/forms/:id/result       their Momo (Bearer token): collect the sealed answer
  *   GET  /ics                        add-to-calendar file
+ *
+ * Live view (the person taps through a CAPTCHA in the errand's browser):
+ *   POST /api/live                   their Momo (Bearer): open one {id, reason}
+ *   POST /api/live/:id/shot          their Momo (Bearer): the latest screenshot {jpeg: base64}
+ *   GET  /api/live/:id/acts          their Momo (Bearer): taps and typing since last time
+ *   POST /api/live/:id/end           their Momo (Bearer): over
+ *   GET  /api/live/:id               the page: {reason}
+ *   GET  /api/live/:id/shot          the page: image/jpeg (204 until the first one)
+ *   POST /api/live/:id/act           the page: {type: tap|type|scroll|done, ...}
  */
 export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } = {}) {
   return async function handle(req) {
@@ -130,6 +158,7 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
       return json({ token });
     }
 
+    if (parts[0] === "live") return live(parts.slice(1));
     if (parts[0] !== "forms") return json({ error: "not found" }, 404);
     const id = parts[1];
 
@@ -184,5 +213,62 @@ export function createRelay(store, { devicesPerHour = 20, formsPerHour = 120 } =
     }
 
     return json({ error: "not found" }, 404);
+
+    async function live([id, sub]) {
+      if (!id && m === "POST") {
+        const dev = await device();
+        if (!dev) return json({ error: "unauthorized" }, 401);
+        if ((await store.incr(`rl:forms:${dev}`, 3600)) > formsPerHour) return json({ error: "too many" }, 429);
+        const b = await body();
+        if (!ID.test(b.id ?? "") || typeof b.reason !== "string" || b.reason.length > 300) return json({ error: "bad request" }, 400);
+        if (!(await store.set(`live:${b.id}`, JSON.stringify({ dev, reason: b.reason }), LIVE_TTL_S, true))) return json({ error: "exists" }, 409);
+        return json({ ok: true });
+      }
+      if (!ID.test(id ?? "")) return json({ error: "not found" }, 404);
+      const raw = await store.get(`live:${id}`);
+      if (!raw) return json({ error: "expired" }, 410);
+      const rec = JSON.parse(raw);
+      const mine = async () => (await device()) === rec.dev;
+      // After "done" the phone's side is over, but their Momo still collects the last taps.
+      if (rec.done && !["acts", "end"].includes(sub)) return json({ error: "expired" }, 410);
+
+      if (!sub && m === "GET") return json({ reason: rec.reason });
+      if (sub === "shot" && m === "GET") {
+        const shot = await store.get(`live:${id}:shot`);
+        if (!shot) return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+        return new Response(Uint8Array.from(atob(shot), (c) => c.charCodeAt(0)), { headers: { "content-type": "image/jpeg", "cache-control": "no-store" } });
+      }
+      if (sub === "act" && m === "POST") {
+        const b = await body();
+        const ok =
+          (b.type === "tap" && b.x >= 0 && b.x <= 1 && b.y >= 0 && b.y <= 1) ||
+          (b.type === "type" && ((typeof b.text === "string" && b.text.length <= 500) || ["Enter", "Tab", "Backspace", "Escape"].includes(b.key))) ||
+          (b.type === "scroll" && Math.abs(Number(b.dy)) <= 3000) ||
+          b.type === "done";
+        if (!ok) return json({ error: "bad request" }, 400);
+        await store.rpush(`live:${id}:acts`, JSON.stringify(b), LIVE_TTL_S);
+        if (b.type === "done") await store.set(`live:${id}`, JSON.stringify({ ...rec, done: true }), 120);
+        return json({ ok: true });
+      }
+      if (!(await mine())) return json({ error: "unauthorized" }, 401);
+      if (sub === "shot" && m === "POST") {
+        const { jpeg } = await body();
+        if (typeof jpeg !== "string" || !jpeg || jpeg.length > MAX_SHOT) return json({ error: "bad request" }, 400);
+        await store.set(`live:${id}:shot`, jpeg, SHOT_TTL_S);
+        return json({ ok: true });
+      }
+      if (sub === "acts" && m === "GET") {
+        const acts = (await store.popall(`live:${id}:acts`)).map((a) => JSON.parse(a));
+        if (rec.done && !acts.length) return json({ error: "expired" }, 410);
+        return json({ acts });
+      }
+      if (sub === "end" && m === "POST") {
+        await store.del(`live:${id}`);
+        await store.del(`live:${id}:shot`);
+        await store.del(`live:${id}:acts`);
+        return json({ ok: true });
+      }
+      return json({ error: "not found" }, 404);
+    }
   };
 }

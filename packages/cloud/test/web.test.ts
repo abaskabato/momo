@@ -45,6 +45,33 @@ test("relay: device token, open a link, seal on the phone, collect once", async 
   assert.equal((await call(relay, `/api/forms/${id}/result`, { token })).status, 410, "collected once");
 });
 
+test("relay: a live view passes screenshots one way and taps the other, and ends on done", async () => {
+  const relay = createRelay(memoryStore());
+  const { token } = (await (await call(relay, "/api/devices", { method: "POST" })).json()) as { token: string };
+  const id = "live-0123456789abcdef";
+  assert.equal((await call(relay, "/api/live", { method: "POST", body: JSON.stringify({ id, reason: "Prove you're human." }) })).status, 401);
+  assert.equal((await call(relay, "/api/live", { method: "POST", token, body: JSON.stringify({ id, reason: "Prove you're human." }) })).status, 200);
+  assert.deepEqual(await (await call(relay, `/api/live/${id}`)).json(), { reason: "Prove you're human." });
+  assert.equal((await call(relay, `/api/live/${id}/shot`)).status, 204, "no picture yet");
+  const jpeg = Buffer.from("not really a jpeg but bytes").toString("base64");
+  assert.equal((await call(relay, `/api/live/${id}/shot`, { method: "POST", body: JSON.stringify({ jpeg }) })).status, 401, "only the computer sends pictures");
+  assert.equal((await call(relay, `/api/live/${id}/shot`, { method: "POST", token, body: JSON.stringify({ jpeg }) })).status, 200);
+  const shot = await call(relay, `/api/live/${id}/shot`);
+  assert.equal(shot.headers.get("content-type"), "image/jpeg");
+  assert.equal(Buffer.from(await shot.arrayBuffer()).toString(), "not really a jpeg but bytes");
+  assert.equal((await call(relay, `/api/live/${id}/act`, { method: "POST", body: JSON.stringify({ type: "tap", x: 2, y: 0 }) })).status, 400);
+  assert.equal((await call(relay, `/api/live/${id}/act`, { method: "POST", body: JSON.stringify({ type: "tap", x: 0.5, y: 0.5 }) })).status, 200);
+  assert.equal((await call(relay, `/api/live/${id}/act`, { method: "POST", body: JSON.stringify({ type: "type", text: "hello" }) })).status, 200);
+  assert.equal((await call(relay, `/api/live/${id}/acts`)).status, 401);
+  assert.deepEqual(await (await call(relay, `/api/live/${id}/acts`, { token })).json(), { acts: [{ type: "tap", x: 0.5, y: 0.5 }, { type: "type", text: "hello" }] });
+  assert.deepEqual(await (await call(relay, `/api/live/${id}/acts`, { token })).json(), { acts: [] }, "each action is delivered once");
+  assert.equal((await call(relay, `/api/live/${id}/act`, { method: "POST", body: JSON.stringify({ type: "done" }) })).status, 200);
+  assert.equal((await call(relay, `/api/live/${id}`)).status, 410, "over for the phone");
+  assert.deepEqual(await (await call(relay, `/api/live/${id}/acts`, { token })).json(), { acts: [{ type: "done" }] }, "the computer still gets the last actions");
+  assert.equal((await call(relay, `/api/live/${id}/acts`, { token })).status, 410, "and then learns it's over");
+  assert.equal((await call(relay, `/api/live/${id}/end`, { method: "POST", token })).status, 200);
+});
+
 test("relay: rejects bad input, rate-limits sign-ups, serves calendar files", async () => {
   const relay = createRelay(memoryStore(), { devicesPerHour: 2 });
   assert.equal((await call(relay, "/api/devices", { method: "POST" })).status, 200);
@@ -68,6 +95,14 @@ test("relay: on Vercel without storage it says what to add", async () => {
   const res = await createRelay(null)(new Request(`${BASE}/api/devices`, { method: "POST" }));
   assert.equal(res.status, 503);
   assert.match(((await res.json()) as { error: string }).error, /Upstash/);
+});
+
+test("web: the root of the repo deploys the same site as apps/web", () => {
+  const root = JSON.parse(readFileSync(new URL("../../../vercel.json", import.meta.url), "utf8"));
+  const web = JSON.parse(readFileSync(new URL("../../../apps/web/vercel.json", import.meta.url), "utf8"));
+  assert.deepEqual(root.rewrites, web.rewrites);
+  assert.deepEqual(root.headers, web.headers);
+  assert.equal(root.outputDirectory, "apps/web/public");
 });
 
 test("in a real browser: the setup page makes momo.env, and a secure link seals on the 'phone'", { timeout: 60_000 }, async () => {

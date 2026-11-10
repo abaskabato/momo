@@ -228,8 +228,9 @@ export class HostedRuntime {
       ownerHandles: [route.handle],
       onboarding: "welcome",
       secureLinks: { create: (spec) => this.createLink(uid, spec) },
-      // A live view streams this process's browser, so it needs a public address.
-      liveViews: this.isPublic() ? { create: async (task, page, reason) => this.createLive(uid, task.id, page as LivePage, reason) } : undefined,
+      // A live view streams this process's browser: straight from here with a
+      // public address, otherwise through the relay. Neither: not offered.
+      liveViews: this.isPublic() || this.o.relay ? { create: async (task, page, reason) => this.createLive(uid, task.id, page as LivePage, reason) } : undefined,
       phone: this.o.voice && {
         call: async (task, req) => {
           const token = randomBytes(16).toString("base64url");
@@ -305,12 +306,72 @@ export class HostedRuntime {
     return { id, url: `${this.base()}/s/${id}` };
   }
 
-  private createLive(uid: string, taskId: string, page: LivePage, reason: string): string {
+  private async createLive(uid: string, taskId: string, page: LivePage, reason: string): Promise<string> {
     const now = Date.now();
     for (const [k, v] of this.live) if (v.expires < now || v.taskId === taskId) this.live.delete(k);
     const id = randomBytes(18).toString("base64url");
     this.live.set(id, { uid, taskId, page, expires: now + LIVE_TTL_MS, reason });
-    return `${this.base()}/l/${id}`;
+    if (this.isPublic()) return `${this.base()}/l/${id}`;
+    const res = await this.relayFetch("/api/live", { method: "POST", body: JSON.stringify({ id, reason }) });
+    if (!res.ok) throw new Error(`relay: ${res.status}`);
+    void this.pumpLive(id).catch((e) => this.o.log?.(`live view: ${(e as Error).message}`));
+    return `${this.linkBase()}/l/${id}`;
+  }
+
+  /** Through the relay: send screenshots, apply the phone's taps, until "done" or the view expires. */
+  private async pumpLive(id: string): Promise<void> {
+    const every = this.o.relay?.pollMs ?? 1500;
+    let lastShot = "";
+    try {
+      await this.pumpLiveLoop(id, every, (shot) => (lastShot === shot ? false : ((lastShot = shot), true)));
+    } finally {
+      this.live.delete(id);
+      await this.relayFetch(`/api/live/${id}/end`, { method: "POST" }).catch(() => {});
+    }
+  }
+
+  private async pumpLiveLoop(id: string, every: number, fresh: (shot: string) => boolean): Promise<void> {
+    while (this.liveFor(id)) {
+      const v = this.live.get(id)!;
+      const acts = await this.relayFetch(`/api/live/${id}/acts`);
+      if (acts.status === 410 || acts.status === 401) break;
+      if (acts.ok) {
+        for (const a of ((await acts.json()) as { acts: Array<Record<string, unknown>> }).acts) {
+          const r = await this.applyLive(id, v, String(a.type), a);
+          if (r === "done" || !this.live.has(id)) return;
+        }
+      }
+      const jpeg = (await v.page.screenshot({ type: "jpeg", quality: 50 }).catch(() => undefined))?.toString("base64");
+      if (jpeg && fresh(jpeg)) await this.relayFetch(`/api/live/${id}/shot`, { method: "POST", body: JSON.stringify({ jpeg }) });
+      await new Promise((r) => setTimeout(r, every));
+    }
+  }
+
+  /** One thing the person did in the live view. Returns "done" when they're finished. */
+  private async applyLive(id: string, v: { uid: string; taskId: string; page: LivePage }, action: string, b: { x?: unknown; y?: unknown; text?: unknown; key?: unknown; dy?: unknown }): Promise<"ok" | "done" | "bad" | "unknown"> {
+    const size = v.page.viewportSize() ?? { width: 1280, height: 860 };
+    switch (action) {
+      case "tap":
+        if (!(Number(b.x) >= 0 && Number(b.x) <= 1 && Number(b.y) >= 0 && Number(b.y) <= 1)) return "bad";
+        await v.page.mouse.click(Number(b.x) * size.width, Number(b.y) * size.height);
+        // Let a navigation the tap started land before the next screenshot or "done".
+        await v.page.waitForTimeout(300);
+        await v.page.waitForLoadState("domcontentloaded").catch(() => {});
+        return "ok";
+      case "type":
+        if (typeof b.key === "string" && ["Enter", "Tab", "Backspace", "Escape"].includes(b.key)) await v.page.keyboard.press(b.key);
+        else if (typeof b.text === "string" && b.text.length <= 500) await v.page.keyboard.type(b.text);
+        return "ok";
+      case "scroll":
+        await v.page.mouse.wheel(0, Math.max(-3000, Math.min(3000, Number(b.dy) || 0)));
+        return "ok";
+      case "done":
+        this.live.delete(id);
+        await this.enqueue(v.uid, { kind: "resume", taskId: v.taskId, text: "done" });
+        return "done";
+      default:
+        return "unknown";
+    }
   }
 
   private liveFor(id: string) {
@@ -359,32 +420,13 @@ export class HostedRuntime {
       return c.body(new Uint8Array(jpg), 200, { "content-type": "image/jpeg", "cache-control": "no-store" });
     });
     app.post("/l/:id/:action", async (c) => {
-      const v = this.liveFor(c.req.param("id"));
+      const id = c.req.param("id");
+      const v = this.liveFor(id);
       if (!v) return c.json({ error: "expired" }, 410);
-      const b = (await c.req.json().catch(() => ({}))) as { x?: number; y?: number; text?: string; key?: string; dy?: number };
-      const size = v.page.viewportSize() ?? { width: 1280, height: 860 };
-      switch (c.req.param("action")) {
-        case "tap":
-          if (!(Number(b.x) >= 0 && Number(b.x) <= 1 && Number(b.y) >= 0 && Number(b.y) <= 1)) return c.json({ error: "bad tap" }, 400);
-          await v.page.mouse.click(Number(b.x) * size.width, Number(b.y) * size.height);
-          // Let a navigation the tap started land before the next screenshot or "done".
-          await v.page.waitForTimeout(300);
-          await v.page.waitForLoadState("domcontentloaded").catch(() => {});
-          break;
-        case "type":
-          if (b.key && ["Enter", "Tab", "Backspace", "Escape"].includes(b.key)) await v.page.keyboard.press(b.key);
-          else if (typeof b.text === "string" && b.text.length <= 500) await v.page.keyboard.type(b.text);
-          break;
-        case "scroll":
-          await v.page.mouse.wheel(0, Math.max(-3000, Math.min(3000, Number(b.dy) || 0)));
-          break;
-        case "done":
-          this.live.delete(c.req.param("id"));
-          await this.enqueue(v.uid, { kind: "resume", taskId: v.taskId, text: "done" });
-          break;
-        default:
-          return c.json({ error: "unknown" }, 404);
-      }
+      const b = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      const r = await this.applyLive(id, v, c.req.param("action"), b);
+      if (r === "bad") return c.json({ error: "bad tap" }, 400);
+      if (r === "unknown") return c.json({ error: "unknown" }, 404);
       return c.json(ok);
     });
 
