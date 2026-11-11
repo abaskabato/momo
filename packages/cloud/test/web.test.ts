@@ -3,7 +3,10 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateDeviceKeys, openJson, WEB_SEAL_SOURCE } from "@momo/protocol";
 import { createRelay, memoryStore, MODEL_PROVIDERS } from "../../../apps/web/lib/relay.js";
 import { PROVIDERS } from "@momo/agent-core";
@@ -235,8 +238,14 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.getByText("Found your bot: @ana_momo_bot").waitFor();
     await page.click("[data-os=mac]");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
-    assert.equal(download.suggestedFilename(), "Install Momo.command");
-    const installer = readFileSync((await download.path())!, "utf8");
+    assert.equal(download.suggestedFilename(), "Install Momo.zip");
+    // A Mac unpacks the zip and keeps the execute bit; a bare download would lose it.
+    const dir = mkdtempSync(join(tmpdir(), "momo-zip-"));
+    execFileSync("unzip", ["-q", (await download.path())!, "-d", dir]);
+    const unpacked = join(dir, "Install Momo.command");
+    assert.ok(statSync(unpacked).mode & 0o100, "unpacked installer is executable");
+    const installer = readFileSync(unpacked, "utf8");
+    assert.match(installer, /^#!\/bin\/sh\n/);
     assert.match(installer, new RegExp(`curl -fsSL ${base}/install.sh \\| sh`));
     const env = envFromInstaller(installer);
     assert.equal(env.MOMO_MODEL, "gemini/gemini-flash-latest");

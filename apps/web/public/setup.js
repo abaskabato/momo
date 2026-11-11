@@ -100,7 +100,7 @@ const guessOs = () => (/Win/.test(navigator.platform) ? "windows" : /Mac|iP/.tes
 let os = guessOs();
 
 const OS = {
-  mac: { label: "Mac", file: "Install Momo.command", how: "Open the file you just downloaded. If your Mac says it can't be opened, right-click it and choose Open; it's a plain script you can read." },
+  mac: { label: "Mac", file: "Install Momo.zip", how: "Open the file you just downloaded: it unpacks to Install Momo.command. Open that. If your Mac says it can't be opened, right-click it and choose Open; it's a plain script you can read." },
   windows: { label: "Windows", file: "Install Momo.cmd", how: "Open the file you just downloaded. If Windows says it protected your PC, choose More info, then Run anyway." },
   linux: { label: "Linux", file: "install-momo.sh", how: "Run the file you just downloaded in a terminal:  sh ~/Downloads/install-momo.sh" },
 };
@@ -149,8 +149,30 @@ async function settings() {
   return { text: lines.join("\n") + "\n", relay };
 }
 
+// A zip that marks its one file executable. Browsers drop the execute bit on a
+// plain download, so a Mac can't run a bare .command; it unpacks a zip correctly.
+const CRC = new Uint32Array(256).map((_, n) => { for (let k = 0; k < 8; k++) n = n & 1 ? 0xedb88320 ^ (n >>> 1) : n >>> 1; return n >>> 0; });
+function zipExecutable(name, text) {
+  const data = new TextEncoder().encode(text);
+  const fname = new TextEncoder().encode(name);
+  let crc = 0xffffffff;
+  for (const b of data) crc = CRC[(crc ^ b) & 0xff] ^ (crc >>> 8);
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const le = (n, bytes) => Array.from({ length: bytes }, (_, i) => (n >>> (8 * i)) & 0xff);
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const common = [...le(20, 2), ...le(0, 2), ...le(0, 2), ...le(dosTime, 2), ...le(dosDate, 2), ...le(crc, 4), ...le(data.length, 4), ...le(data.length, 4), ...le(fname.length, 2), ...le(0, 2)];
+  const local = [...le(0x04034b50, 4), ...common, ...fname];
+  const unixMode = 0o100755; // a regular file, executable
+  const central = [...le(0x02014b50, 4), ...le(0x031e, 2), ...common, ...le(0, 2), ...le(0, 2), ...le(0, 2), ...le((unixMode << 16) >>> 0, 4), ...le(0, 4), ...fname];
+  const cdOffset = local.length + data.length;
+  const end = [...le(0x06054b50, 4), ...le(0, 2), ...le(0, 2), ...le(1, 2), ...le(1, 2), ...le(central.length, 4), ...le(cdOffset, 4), ...le(0, 2)];
+  return new Uint8Array([...local, ...data, ...central, ...end]);
+}
+
 function download(name, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: "text/plain" }));
+  const url = URL.createObjectURL(new Blob([content], { type: name.endsWith(".zip") ? "application/zip" : "text/plain" }));
   Object.assign(document.createElement("a"), { href: url, download: name }).click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
@@ -162,7 +184,7 @@ $("download").addEventListener("click", async () => {
   say(st, "Making your installer…");
   try {
     const { text, relay } = await settings();
-    download(OS[os].file, installerFor(os, text));
+    download(OS[os].file, os === "mac" ? zipExecutable("Install Momo.command", installerFor(os, text)) : installerFor(os, text));
     say(st, `Saved ${OS[os].file} to your Downloads.`, "ok");
     $("after").hidden = false;
     $("os-how").textContent = OS[os].how;

@@ -20,7 +20,7 @@ Momo has two halves:
 With a site whose operator pre-filled the AI and the bot, it's three steps:
 
 1. Open the Momo website and click **Download Momo**.
-2. Open the file it saved (`Install Momo.command` on a Mac, `Install Momo.cmd`
+2. Open the file it saved (`Install Momo.zip` on a Mac, which unpacks to `Install Momo.command`; `Install Momo.cmd`
    on Windows, `install-momo.sh` on Linux). It installs everything into
    `~/.momo`, including its own Node.js if needed, starts Momo, and sets it to
    start whenever you log in. A Mac may say the file can't be opened: right-click
