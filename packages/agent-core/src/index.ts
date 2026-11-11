@@ -27,3 +27,4 @@ export * from "./llm.ts";
 export { runErrand, report, type Errand, type EvalResult, type RunOptions } from "./eval.ts";
 export * from "./inbox.ts";
 export * from "./computer.ts";
+export * from "./pc.ts";

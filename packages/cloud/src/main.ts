@@ -63,7 +63,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
-  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
@@ -99,7 +99,10 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       : desktopMode === "cloud"
         ? new DockerComputers({ image: env.MOMO_DESKTOP_IMAGE || "momo-desktop" })
         : undefined;
-  const web = new WebTaskSkill(planner, browser, computers);
+  // MOMO_ACCESS=full: files and commands on this computer too (the owner's own; one owner).
+  // Looking is free; every change is shown to the owner and waits for their YES.
+  const pc = env.MOMO_ACCESS === "full" ? new LocalPc() : undefined;
+  const web = new WebTaskSkill(planner, browser, computers, pc);
   const runtime = new HostedRuntime({
     redis: kv,
     keys: new UserKeys(Buffer.from(master, "base64")),
@@ -115,7 +118,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     // that posts to /v1/hosted/email/<INBOUND_EMAIL_SECRET>.
     emailDomain: env.MOMO_EMAIL_DOMAIN,
     inboundEmailSecret: env.INBOUND_EMAIL_SECRET,
-    singleOwner: desktopMode === "local" || env.MOMO_SINGLE_OWNER === "1",
+    singleOwner: desktopMode === "local" || !!pc || env.MOMO_SINGLE_OWNER === "1",
     relay,
     log: (m) => console.error(m),
   });
@@ -131,7 +134,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
         `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : "headless Chromium"}`,
         `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
       ];
-      if (desktopMode === "local") notes.push("Private: only the first person to text this Momo can use it.");
+      if (pc) notes.push("files and commands: full access to this computer (it looks freely; every change asks for your YES)");
+      if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {
         const me = await telegram.me();
         void telegram.poll((m) => runtime.accept(m), stop.signal, (e) => console.error(`telegram: ${e.message}`));

@@ -86,6 +86,7 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 |---|---|---|
 | unset (default) | Anything on websites, in its own private browser | You (or many people, on a server) |
 | `local` | Any app on this computer, via [agent-desktop](https://github.com/vercel-labs/agent-desktop). The installer walks through the Mac accessibility permission | Only you |
+| `local` + `MOMO_ACCESS=full` | Everything on this computer: apps, plus reading files and running commands directly. It looks freely; every change (the exact command, or the file it would replace) is texted to you and waits for your YES. It can't read its own keys in `~/.momo` | Only you |
 | `cloud` | Any app, in a fresh Linux desktop per errand (`docker build -f Dockerfile.desktop -t momo-desktop .`) | Many people |
 
 ## Good to know
