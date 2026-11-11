@@ -71,6 +71,7 @@ async function boot(env: Record<string, string>, tgBase: string) {
       GEMINI_API_KEY: "unused",
       TELEGRAM_BOT_TOKEN: "TEST:token",
       TELEGRAM_API_BASE: tgBase,
+      MOMO_MODEL_BASE_URL: tgBase, // the startup AI check gets a quick 404 instead of calling a real provider
       MOMO_SINGLE_OWNER: "1",
       ...env,
     },
@@ -97,6 +98,7 @@ async function bootAndChat(env: Record<string, string>) {
   try {
     await s.until(() => s.log.out.includes("Telegram: text https://t.me/my_momo_bot (polling)"), "prints the bot link");
     assert.match(s.log.out, /No PUBLIC_URL/);
+    assert.match(s.log.out, /AI PROBLEM: /, "a model that can't be reached is called out at startup");
     await s.until(() => tg.state.webhookCleared, "polling clears any webhook");
     const health = await fetch(`http://127.0.0.1:${s.port}/healthz`).then((r) => r.json());
     assert.deepEqual(health, { ok: true });

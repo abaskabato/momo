@@ -147,6 +147,14 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
       if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
       else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");
+      // Check the AI once at startup so a wrong key or model name is obvious in the log.
+      try {
+        await answerer.answer("Reply with the single word: ok", "");
+        notes.push("AI check: ok");
+      } catch (e) {
+        notes.push(`AI PROBLEM: ${(e as Error).message.slice(0, 300)}`);
+        notes.push("Momo will answer texts with this error until the model name/key in its settings is fixed.");
+      }
       void runtime.run(Number(env.MOMO_WORKERS ?? 8));
       return notes;
     },

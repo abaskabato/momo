@@ -23,6 +23,7 @@ import {
   type Block,
   type Planner,
   type Turn,
+  failureText,
 } from "@momo/agent-core";
 import { HostedRuntime, TelegramAdapter, UserKeys, WhatsAppAdapter, type HostedOptions } from "../src/index.ts";
 import { createRelay, memoryStore } from "../../../apps/web/lib/relay.js";
@@ -230,6 +231,27 @@ test("on a person's own computer: the secure link opens on their phone through t
   assert.ok(sent.some((m) => m.text === `Saved your ${new URL(site.origin).host} login. Continuing.`));
   assert.match(sent.at(-1)!.text, /Book Nopa, .*Reply YES/s);
   assert.equal(await rt.pollRelay(), 0, "collected once");
+});
+
+test("a broken AI setting never means silence: the person is told what's wrong", { timeout: 60_000 }, async () => {
+  const broken: Planner = {
+    async next() {
+      throw new Error('groq 404: {"error":{"message":"The model `gpt` does not exist or you do not have access to it."}}');
+    },
+  };
+  const { rt, app } = runtime(broken, () => FRIDAY_NOON, {
+    answer: async () => {
+      throw new Error("groq 404: The model `gpt` does not exist");
+    },
+  });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "I'm Ana");
+  await tg(app, rt, "San Francisco");
+  // An errand, and a plain question (which used to fail silently): both get an answer.
+  assert.match(await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm"), /model name in Momo's settings doesn't exist/);
+  assert.match(await tg(app, rt, "how are you?"), /model name in Momo's settings doesn't exist/);
+  assert.match(failureText(new Error("gemini 429: quota exceeded")), /out of quota/);
+  assert.match(failureText(new Error("openai 401: invalid api key")), /key was refused/);
 });
 
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {

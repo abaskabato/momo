@@ -226,11 +226,18 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     const cspErrors: string[] = [];
     page.on("console", (m) => /Content Security Policy/i.test(m.text()) && cspErrors.push(m.text()));
     // Keys are checked with the provider straight from the browser; stand in for Gemini and Telegram.
-    await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, body: "{}" }));
+    await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-pro-latest" }] }) }));
     await page.route("https://api.telegram.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, result: { username: "ana_momo_bot" } }) }));
     await page.goto(base);
     await page.getByRole("heading", { name: /Pick the AI/ }).waitFor();
     await page.fill("#key", "AIza-test-key");
+    // A model name the key doesn't have is caught here, not after installing.
+    await page.fill("#model", "gpt");
+    await page.click("#check-model");
+    await page.getByText('it has no model called "gpt". Try one of: gemini-flash-latest').waitFor();
+    await page.click("#download");
+    await page.getByText('That key has no model called "gpt"').waitFor();
+    await page.fill("#model", "gemini-flash-latest");
     await page.click("#check-model");
     await page.getByText("The key works.").waitFor();
     await page.fill("#bot", "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");

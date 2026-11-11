@@ -8,11 +8,11 @@ const PROVIDERS = [
     check: (k) => fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(k)}`) },
   { id: "anthropic", label: "Anthropic Claude", keyEnv: "ANTHROPIC_API_KEY", model: "claude-opus-5-5", keyUrl: "https://console.anthropic.com/settings/keys",
     check: (k) => fetch("https://api.anthropic.com/v1/models", { headers: { "x-api-key": k, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } }) },
-  { id: "openai", label: "OpenAI", keyEnv: "OPENAI_API_KEY", model: "", keyUrl: "https://platform.openai.com/api-keys",
+  { id: "openai", label: "OpenAI", keyEnv: "OPENAI_API_KEY", model: "gpt-4o", keyUrl: "https://platform.openai.com/api-keys",
     check: (k) => fetch("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${k}` } }) },
-  { id: "openrouter", label: "OpenRouter (hundreds of models)", keyEnv: "OPENROUTER_API_KEY", model: "", keyUrl: "https://openrouter.ai/keys",
+  { id: "openrouter", label: "OpenRouter (hundreds of models)", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-4o", keyUrl: "https://openrouter.ai/keys",
     check: (k) => fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${k}` } }) },
-  { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", model: "", keyUrl: "https://console.groq.com/keys",
+  { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", model: "llama-3.3-70b-versatile", keyUrl: "https://console.groq.com/keys",
     check: (k) => fetch("https://api.groq.com/openai/v1/models", { headers: { authorization: `Bearer ${k}` } }) },
   { id: "ollama", label: "Ollama (a model on this computer, no key)", model: "" },
 ];
@@ -64,12 +64,30 @@ async function checked(el, run) {
   return false;
 }
 
+/** Model names this key can use, when the provider's list says (empty if unknown). */
+async function modelIds(r) {
+  try {
+    const j = await r.clone().json();
+    const list = j.data ?? j.models ?? [];
+    return list.map((m) => String(m.id ?? m.name ?? "").replace(/^models\//, "")).filter(Boolean);
+  } catch { return []; }
+}
+
 $("check-model").addEventListener("click", async () => {
   const p = current();
   if (!p.check) return say($("model-status"), "Nothing to check for this one.");
   const key = $("key").value.trim();
   if (!key) return say($("model-status"), "Paste the key first.", "bad");
-  if (await checked($("model-status"), () => p.check(key))) say($("model-status"), "The key works.", "ok");
+  let ids = [];
+  const ok = await checked($("model-status"), async () => {
+    const r = await p.check(key);
+    if (r.ok) ids = await modelIds(r);
+    return r;
+  });
+  if (!ok) return;
+  const model = $("model").value.trim();
+  if (ids.length && !ids.includes(model)) return say($("model-status"), `The key works, but it has no model called "${model}". Try one of: ${ids.slice(0, 6).join(", ")}`, "bad");
+  say($("model-status"), "The key works.", "ok");
 });
 
 // --- Step: the bot --------------------------------------------------------
@@ -131,6 +149,12 @@ async function settings() {
     const model = $("model").value.trim();
     if (p.keyEnv && !key) throw new Error("Paste your AI key first.");
     if (!model) throw new Error("Enter the model's name.");
+    if (p.check) {
+      const r = await p.check(key).catch(() => null);
+      if (r && (r.status === 401 || r.status === 403)) throw new Error("That AI key was refused. Check you copied all of it.");
+      const ids = r && r.ok ? await modelIds(r) : [];
+      if (ids.length && !ids.includes(model)) throw new Error(`That key has no model called "${model}". Try one of: ${ids.slice(0, 6).join(", ")}`);
+    }
     lines.push(`MOMO_MODEL=${p.id}/${model}`);
     if (p.keyEnv) lines.push(`${p.keyEnv}=${key}`);
   }

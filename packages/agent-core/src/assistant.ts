@@ -349,7 +349,7 @@ export class Assistant {
     } catch (e) {
       task.status = "failed";
       await this.d.tasks.save(task, `error: ${(e as Error).message}`);
-      await this.d.outbound.send(task.channel, task.threadId, `I couldn't finish that: ${(e as Error).message}`);
+      await this.d.outbound.send(task.channel, task.threadId, failureText(e as Error));
     }
   }
 }
@@ -364,4 +364,13 @@ export function calendarLink(ev: CalendarEvent, publicUrl?: string): string {
   }
   const q = new URLSearchParams({ action: "TEMPLATE", text: ev.title, dates: `${compact(ev.start)}/${compact(end)}`, ...(ev.location && { location: ev.location }) });
   return `https://calendar.google.com/calendar/render?${q}`;
+}
+
+/** What to text the person when something failed: AI setup problems in plain words, anything else as it is. */
+export function failureText(e: Error): string {
+  const m = e.message;
+  if (/\b(401|403)\b|invalid.*api.?key|unauthorized/i.test(m)) return "I can't reach my AI: its key was refused. Check the key in Momo's settings, then text me again.";
+  if (/\b404\b|model.*(not found|does not exist|decommissioned)|unknown model/i.test(m)) return "I can't reach my AI: the model name in Momo's settings doesn't exist. Fix the model name, then text me again.";
+  if (/\b429\b|quota|rate limit/i.test(m)) return "My AI is out of quota or rate-limited right now. Try again in a bit, or switch to a paid key.";
+  return `I couldn't finish that: ${m.slice(0, 400)}`;
 }

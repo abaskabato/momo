@@ -10,7 +10,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { KV } from "./kv.ts";
 import { Hono } from "hono";
 import { openJson, type SecureFormSpec, type SecureFormSubmission } from "@momo/protocol";
-import { createAgent, StaticKeyProvider, type Skill } from "@momo/agent-core";
+import { createAgent, failureText, StaticKeyProvider, type Skill } from "@momo/agent-core";
 import type { ChannelAdapter, Inbound, TelegramAdapter, WhatsAppAdapter } from "./channels.ts";
 import { userIdFor, type UserKeys } from "./keys.ts";
 import { LIVE_HEADERS, liveViewPage, PAGE_HEADERS, secureFormPage } from "./page.ts";
@@ -247,7 +247,13 @@ export class HostedRuntime {
     });
 
     if (job.kind === "message") {
-      await agent.assistant.handle({ channel: job.channel, from: job.from, threadId: job.from, text: job.text, receivedAt: job.at });
+      try {
+        await agent.assistant.handle({ channel: job.channel, from: job.from, threadId: job.from, text: job.text, receivedAt: job.at });
+      } catch (e) {
+        // Never leave a text unanswered: say what went wrong, in plain words.
+        await this.adapter(route.channel).send(route.handle, failureText(e as Error)).catch(() => {});
+        throw e;
+      }
     } else if (job.kind === "secret") {
       await agent.assistant.onSecretSubmitted(openJson<SecureFormSubmission>(this.o.keys.boxKeys(uid), job.sealed));
     } else if (job.kind === "email") {
