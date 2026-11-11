@@ -153,6 +153,15 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
       if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
       else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");
+      // Same for the computer: say now if Momo can't actually reach this computer's apps.
+      if (desktopMode === "local") {
+        try {
+          await new AgentDesktop().listApps();
+          notes.push("computer check: ok (Momo can see and use this computer's apps)");
+        } catch (e) {
+          notes.push(`COMPUTER PROBLEM: ${(e as Error).message.slice(0, 300)}`);
+        }
+      }
       // Check the AI once at startup so a wrong key or model name is obvious in the log.
       try {
         await answerer.answer("Reply with the single word: ok", "");

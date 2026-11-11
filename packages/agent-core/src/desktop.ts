@@ -7,6 +7,9 @@
 // and hands off to Playwright, which is what the browser providers use.
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 
 export interface AdEnvelope<T = unknown> {
   version: string;
@@ -57,6 +60,28 @@ export interface AgentDesktopOptions {
   timeoutMs?: number;
 }
 
+/**
+ * How to start agent-desktop. Its npm command is a small Node script; on
+ * Windows the command on PATH is a .cmd shim that can't be started directly,
+ * so find the script and run it with this Node. Falls back to the bare name.
+ */
+let found: string[] | undefined;
+export function launcher(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (found) return found;
+  const script = join("agent-desktop", "bin", "agent-desktop");
+  const dirs = [
+    env.MOMO_HOME && join(env.MOMO_HOME, "tools", "node_modules"),
+    join(homedir(), ".momo", "tools", "node_modules"),
+    // Each PATH entry may be a node_modules/.bin (the package is its sibling) or an npm prefix (it's below).
+    ...(env.PATH ?? env.Path ?? "").split(delimiter).flatMap((d) => (d ? [join(d, ".."), join(d, "node_modules"), join(d, "..", "lib", "node_modules")] : [])),
+  ].filter((d): d is string => !!d);
+  for (const d of dirs) {
+    const p = join(d, script);
+    if (existsSync(p)) return (found = [process.execPath, p]);
+  }
+  return (found = ["agent-desktop"]);
+}
+
 export class AgentDesktop {
   private readonly opts: AgentDesktopOptions;
 
@@ -70,8 +95,11 @@ export class AgentDesktop {
     if (this.opts.headed) argv.unshift("--headed");
     if (this.opts.session) argv.unshift("--session", this.opts.session);
     return new Promise((resolve, reject) => {
-      const [cmd, ...pre] = [...(this.opts.prefix ?? []), this.opts.bin ?? "agent-desktop"];
-      execFile(cmd!, [...pre, ...argv], { timeout: this.opts.timeoutMs ?? 60_000, maxBuffer: 32 << 20 }, (err, stdout) => {
+      const [cmd, ...pre] = this.opts.prefix || this.opts.bin ? [...(this.opts.prefix ?? []), this.opts.bin ?? "agent-desktop"] : launcher();
+      execFile(cmd!, [...pre, ...argv], { timeout: this.opts.timeoutMs ?? 60_000, maxBuffer: 32 << 20, windowsHide: true }, (err, stdout) => {
+        if (err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+          return reject(new Error("agent-desktop isn't installed on this computer, so Momo can't use its apps. Run the Momo installer again (it installs it), or: npm install -g agent-desktop"));
+        }
         // Exit codes 1 and 2 still print an envelope; parse before judging.
         let env: AdEnvelope<T>;
         try {
