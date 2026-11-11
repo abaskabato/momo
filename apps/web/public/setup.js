@@ -12,7 +12,7 @@ const PROVIDERS = [
     check: (k) => fetch("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${k}` } }) },
   { id: "openrouter", label: "OpenRouter (hundreds of models)", keyEnv: "OPENROUTER_API_KEY", model: "openai/gpt-4o", keyUrl: "https://openrouter.ai/keys",
     check: (k) => fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${k}` } }) },
-  { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", model: "llama-3.3-70b-versatile", keyUrl: "https://console.groq.com/keys",
+  { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", model: "openai/gpt-oss-120b", keyUrl: "https://console.groq.com/keys",
     check: (k) => fetch("https://api.groq.com/openai/v1/models", { headers: { authorization: `Bearer ${k}` } }) },
   { id: "ollama", label: "Ollama (a model on this computer, no key)", model: "" },
 ];
@@ -64,6 +64,15 @@ async function checked(el, run) {
   return false;
 }
 
+/** The model field, without a provider typed in front ("groq/llama-…" → "llama-…"). */
+function modelName() {
+  const p = current();
+  let m = $("model").value.trim();
+  if (m.toLowerCase().startsWith(`${p.id}/`)) m = m.slice(p.id.length + 1);
+  $("model").value = m;
+  return m;
+}
+
 /** Model names this key can use, when the provider's list says (empty if unknown). */
 async function modelIds(r) {
   try {
@@ -85,7 +94,10 @@ $("check-model").addEventListener("click", async () => {
     return r;
   });
   if (!ok) return;
-  const model = $("model").value.trim();
+  const list = $("models");
+  list.textContent = "";
+  for (const id of ids) list.append(new Option(id, id));
+  const model = modelName();
   if (ids.length && !ids.includes(model)) return say($("model-status"), `The key works, but it has no model called "${model}". Try one of: ${ids.slice(0, 6).join(", ")}`, "bad");
   say($("model-status"), "The key works.", "ok");
 });
@@ -146,7 +158,7 @@ async function settings() {
   } else {
     const p = current();
     const key = $("key").value.trim();
-    const model = $("model").value.trim();
+    const model = modelName();
     if (p.keyEnv && !key) throw new Error("Paste your AI key first.");
     if (!model) throw new Error("Enter the model's name.");
     if (p.check) {

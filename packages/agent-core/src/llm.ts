@@ -46,7 +46,9 @@ export function parseModelSpec(spec: string, env: NodeJS.ProcessEnv = process.en
   const slash = spec.indexOf("/");
   if (slash < 1) throw new Error(`model must look like "provider/model", got "${spec}"`);
   const provider = spec.slice(0, slash).toLowerCase();
-  const model = spec.slice(slash + 1);
+  let model = spec.slice(slash + 1).trim();
+  // "groq/groq/llama-…" happens when the provider is typed into the model name too; forgive it.
+  if (model.toLowerCase().startsWith(`${provider}/`)) model = model.slice(provider.length + 1);
   if (provider === "anthropic") return { provider, model };
   if (provider === "custom") {
     if (!env.MOMO_MODEL_BASE_URL) throw new Error("custom/ models need MOMO_MODEL_BASE_URL");

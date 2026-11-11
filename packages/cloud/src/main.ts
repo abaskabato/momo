@@ -63,7 +63,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
-  const { AgentDesktop, createAnswerer, createPlanner, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
@@ -153,6 +153,15 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
         notes.push("AI check: ok");
       } catch (e) {
         notes.push(`AI PROBLEM: ${(e as Error).message.slice(0, 300)}`);
+        // If it's the model name, say which names this key does have.
+        try {
+          const spec = parseModelSpec(env.MOMO_ANSWER_MODEL ?? model);
+          if (spec.baseUrl) {
+            const r = await fetch(`${spec.baseUrl.replace(/\/$/, "")}/models`, { headers: spec.apiKey ? { authorization: `Bearer ${spec.apiKey}` } : {} });
+            const ids = r.ok ? ((await r.json()) as { data?: Array<{ id: string }> }).data?.map((m) => m.id.replace(/^models\//, "")) : undefined;
+            if (ids?.length) notes.push(`Model names this key can use: ${ids.slice(0, 30).join(", ")}. Set MOMO_MODEL=${spec.provider}/<one of these>.`);
+          }
+        } catch {}
         notes.push("Momo will answer texts with this error until the model name/key in its settings is fixed.");
       }
       void runtime.run(Number(env.MOMO_WORKERS ?? 8));

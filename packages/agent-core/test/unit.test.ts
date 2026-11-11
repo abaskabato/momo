@@ -142,3 +142,9 @@ test("email codes and links are found in real-looking emails", async () => {
   assert.equal(guessCode({ subject: "Welcome", text: "Thanks for joining." }), undefined);
   assert.deepEqual(extractLinks('<a href="https://x.com/v?a=1&amp;b=2">go</a> https://x.com/logo.png and https://y.com/ok.'), ["https://x.com/v?a=1&b=2", "https://y.com/ok"]);
 });
+
+test("model spec: a provider typed twice is forgiven", async () => {
+  const { parseModelSpec } = await import("../src/llm.ts");
+  assert.equal(parseModelSpec("groq/groq/llama-3.3-70b-versatile", { GROQ_API_KEY: "k" }).model, "llama-3.3-70b-versatile");
+  assert.equal(parseModelSpec("openrouter/anthropic/claude-opus-5-5", { OPENROUTER_API_KEY: "k" }).model, "anthropic/claude-opus-5-5");
+});
