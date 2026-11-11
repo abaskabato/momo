@@ -279,6 +279,76 @@ test("on a person's computer (file store): a backlog of texts from one person is
   assert.match(sent[2]!.text, /All set/);
 });
 
+test("honest and in context: no false 'Done', a plain question waits for the answer, 'did you book?' is answered from the conversation", { timeout: 60_000 }, async () => {
+  const seen: string[] = [];
+  let mode: "silent" | "asks" = "silent";
+  let turn = 0;
+  const planner: Planner = {
+    async next(_system, history) {
+      seen.push(JSON.stringify(history));
+      if (mode === "silent") return []; // a model that returns nothing at all
+      turn++;
+      if (turn === 1) return [{ type: "text", text: "Which city should I look in?" } as Block];
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "I found three audiology clinics in Bremerton but none take online bookings. Nothing is booked yet." } } as Block];
+    },
+  };
+  const asked: Array<{ q: string; context: string }> = [];
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON, {
+    answer: async (q, context) => {
+      asked.push({ q, context });
+      return "Not yet: I found clinics but nothing is booked.";
+    },
+  });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+
+  // The model says nothing: Momo never claims it's done.
+  const stuck = await tg(app, rt, "book a flight");
+  assert.doesNotMatch(stuck, /^Done\.?$/);
+  assert.match(stuck, /didn't finish this, so nothing was booked/);
+
+  // A question in plain words waits for the answer, then the same errand carries on with it.
+  mode = "asks";
+  assert.equal(await tg(app, rt, "book a hearing evaluation with a pediatric audiologist"), "Which city should I look in?");
+  assert.match(seen.at(-1)!, /Recent conversation, for context only/, "a new errand knows what was just said");
+  const outcome = await tg(app, rt, "bremerton");
+  assert.match(outcome, /three audiology clinics in Bremerton.*Nothing is booked yet/);
+  assert.match(seen.at(-1)!, /Owner answered: bremerton/);
+
+  // "did you book" asks what happened; it doesn't start another booking.
+  const before = seen.length;
+  assert.equal(await tg(app, rt, "did you book"), "Not yet: I found clinics but nothing is booked.");
+  assert.equal(seen.length, before, "no new errand");
+  assert.match(asked.at(-1)!.context, /Owner: book a hearing evaluation[\s\S]*Momo: I found three audiology clinics/);
+
+  // Correcting what Momo knows about you.
+  assert.equal(await tg(app, rt, "my city is Bremerton"), "Got it, you're in Bremerton.");
+});
+
+test("a text-only model: the screenshot is dropped and the errand carries on", async () => {
+  const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
+  const f = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init!.body));
+    bodies.push(body);
+    const hasImage = body.messages.some((m: { content: unknown }) => Array.isArray(m.content));
+    if (hasImage) return new Response(JSON.stringify({ error: { message: "messages[3].content must be a string" } }), { status: 400 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const p = new OpenAICompatiblePlanner(parseModelSpec("groq/some-text-model", { GROQ_API_KEY: "k" }), f);
+  const history: Turn[] = [
+    { role: "user", content: [{ type: "text", text: "Errand: look" }] },
+    { role: "assistant", content: [{ type: "tool_use", id: "s1", name: "screenshot", input: {} }] },
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "s1", content: [{ type: "text", text: "Screenshot." }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "AAAA" } }] }] },
+  ];
+  assert.deepEqual(await p.next("sys", history, WEB_TOOLS), [{ type: "text", text: "ok" }]);
+  assert.equal(bodies.length, 2, "one refusal, one retry without the picture");
+  for (const m of bodies[1]!.messages) assert.equal(typeof m.content, "string", "every message is plain text");
+  assert.match(String(bodies[1]!.messages.at(-1)!.content), /can't see images/);
+  await p.next("sys", history, WEB_TOOLS);
+  assert.equal(bodies.length, 3, "it remembers: no second refusal");
+});
+
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {
   const { rt, app } = runtime(scriptedBooking(site.origin), () => now);
   await tg(app, rt, "hi");

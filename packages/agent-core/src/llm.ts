@@ -74,11 +74,12 @@ export function createAnswerer(spec: string, env = process.env, fetchImpl: typeo
 type ChatMessage =
   | { role: "system"; content: string }
   | { role: "user"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> }
-  | { role: "assistant"; content: string | null; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
+  | { role: "assistant"; content: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
   | { role: "tool"; tool_call_id: string; content: string };
 
 /** Momo's internal turns -> chat messages. Provider-specific blocks (e.g. thinking) are dropped. */
-export function toChatMessages(system: string, history: Turn[]): ChatMessage[] {
+export function toChatMessages(system: string, history: Turn[], opts: { images?: boolean } = {}): ChatMessage[] {
+  const withImages = opts.images !== false;
   const out: ChatMessage[] = [{ role: "system", content: system }];
   for (const turn of history) {
     if (turn.role === "assistant") {
@@ -86,7 +87,8 @@ export function toChatMessages(system: string, history: Turn[]): ChatMessage[] {
       const calls = turn.content.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
       out.push({
         role: "assistant",
-        content: text || null,
+        // An empty string, not null: some providers insist every message's content is a string.
+        content: text,
         ...(calls.length && { tool_calls: calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.input) } })) }),
       });
     } else {
@@ -97,8 +99,8 @@ export function toChatMessages(system: string, history: Turn[]): ChatMessage[] {
           const r = b as Extract<Block, { type: "tool_result" }>;
           let text: string;
           if (Array.isArray(r.content)) {
-            text = r.content.map((p) => (p.type === "text" ? p.text : "[image attached below]")).join("\n");
-            for (const p of r.content) if (p.type === "image") images.push(`data:${p.source.media_type};base64,${p.source.data}`);
+            text = r.content.map((p) => (p.type === "text" ? p.text : withImages ? "[image attached below]" : "[This model can't see images. Use read_page or computer_read instead of screenshots.]")).join("\n");
+            if (withImages) for (const p of r.content) if (p.type === "image") images.push(`data:${p.source.media_type};base64,${p.source.data}`);
           } else {
             text = r.content;
           }
@@ -157,17 +159,27 @@ async function chat(s: ModelSpec, fetchImpl: typeof fetch, body: Record<string, 
 export class OpenAICompatiblePlanner implements Planner {
   private readonly s: ModelSpec;
   private readonly fetchImpl: typeof fetch;
+  /** Turned off the first time the model refuses an image; many fast models are text-only. */
+  private images = true;
   constructor(s: ModelSpec, fetchImpl: typeof fetch = fetch) {
     this.s = s;
     this.fetchImpl = fetchImpl;
   }
   async next(system: string, history: Turn[], tools: ToolSpec[]): Promise<Block[]> {
-    const message = await chat(this.s, this.fetchImpl, {
-      messages: toChatMessages(system, history),
-      tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
-      tool_choice: "auto",
-    });
-    return fromChatChoice(message);
+    const ask = () =>
+      chat(this.s, this.fetchImpl, {
+        messages: toChatMessages(system, history, { images: this.images }),
+        tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.input_schema } })),
+        tool_choice: "auto",
+      });
+    try {
+      return fromChatChoice(await ask());
+    } catch (e) {
+      // A text-only model rejects the screenshot message. Carry on without pictures instead of failing the errand.
+      if (!this.images || !/\b400\b/.test((e as Error).message) || !/content must be a string|image|vision|multimodal|multi-modal/i.test((e as Error).message)) throw e;
+      this.images = false;
+      return fromChatChoice(await ask());
+    }
   }
 }
 
@@ -181,7 +193,7 @@ export class OpenAICompatibleAnswerer implements Answerer {
   async answer(question: string, context: string): Promise<string> {
     const message = await chat(this.s, this.fetchImpl, {
       messages: [
-        { role: "system", content: `You are Momo, a personal assistant people text. Plain text, no Markdown, 1-4 short lines, answer first.\n${context}` },
+        { role: "system", content: `You are Momo, a personal assistant people text. Plain text, no Markdown, 1-4 short lines, answer first. If they ask what happened with something, answer from the recent conversation below and be honest: never claim something was booked, bought or done unless the conversation shows it was.\n${context}` },
         { role: "user", content: question },
       ],
     });

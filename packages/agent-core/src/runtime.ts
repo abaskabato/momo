@@ -4,7 +4,7 @@
 import { join } from "node:path";
 import { generateDeviceKeys, type Channel, type DeviceKeys } from "@momo/protocol";
 import { ApprovalGate, type Approval } from "./approvals.ts";
-import { Assistant, type PendingForm } from "./assistant.ts";
+import { Assistant, type ChatLine, type PendingForm } from "./assistant.ts";
 import { Owners, type OnboardingStep, type OwnerState } from "./owners.ts";
 import type { LiveViews, PhoneCaller, SecureLinks } from "./skill.ts";
 import type { Outbound } from "./channels.ts";
@@ -87,6 +87,7 @@ export async function createAgent(o: AgentOptions & { keyProvider: KeyProvider }
     home: o.home,
     answer: o.answer,
     pendingForms: o.docs<PendingForm[]>("forms", () => []),
+    chat: o.docs<ChatLine[]>("chat", () => []),
     now,
   });
   return { assistant, vault, tasks, approvals, timers, memory, spend, owners, claimCode, inbox };

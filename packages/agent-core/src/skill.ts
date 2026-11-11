@@ -61,6 +61,8 @@ export interface SkillContext {
   requestLogin(task: Task, origin: string, label: string): Promise<string>;
   /** Same, for a payment card or a delivery address (not bound to one site). */
   requestSecret(task: Task, kind: "card" | "address"): Promise<string>;
+  /** The last few messages between the owner and Momo, oldest first (for "the hearing evaluation" to make sense). */
+  recentConversation?: () => Promise<string>;
   liveViews?: LiveViews;
   phone?: PhoneCaller;
   /** The owner's Momo inbox (hosted), where sites send codes and confirmation links. */

@@ -42,6 +42,8 @@ export interface AssistantDeps {
   publicUrl?: string;
   /** Answers anything that isn't an errand (questions, chit-chat). Hosted mode has no other brain. */
   answer?: (text: string, context: string) => Promise<string>;
+  /** The last few messages each way, so follow-ups and "did you book it?" have something to stand on. */
+  chat?: Doc<ChatLine[]>;
   /** Secure links awaiting an answer; the origin is kept here, not trusted from the link. */
   pendingForms: Doc<PendingForm[]>;
   now?: () => Date;
@@ -64,11 +66,37 @@ export interface HandleResult {
 
 const DIRECT_CHANNELS = new Set(["imessage", "sms", "telegram", "whatsapp", "signal", "app"]);
 
+export interface ChatLine {
+  who: "owner" | "momo";
+  text: string;
+  at: number;
+}
+const CHAT_KEEP = 24;
+
+/** A question about what happened, not a new errand ("did you book it?", "what is done"). */
+const ASKING = /^(did|have|has|had|what|what'?s|whats|why|when|where|who|how|is|are|was|were|do you|does|any (update|news|luck)|status|so)\b/i;
+
 export class Assistant {
   private readonly d: AssistantDeps;
   private readonly ctx: SkillContext;
 
+  /** Remember a message (either direction). */
+  private async note(who: ChatLine["who"], text: string): Promise<void> {
+    if (!this.d.chat) return;
+    const at = (this.d.now ?? (() => new Date()))().getTime();
+    await this.d.chat.update((all) => all.concat({ who, text: text.slice(0, 600), at }).slice(-CHAT_KEEP));
+  }
+
+  /** The recent conversation as text, oldest first. */
+  async recentConversation(max = 12): Promise<string> {
+    const all = this.d.chat ? await this.d.chat.read() : [];
+    return all.slice(-max).map((l) => `${l.who === "owner" ? "Owner" : "Momo"}: ${l.text}`).join("\n");
+  }
+
   constructor(deps: AssistantDeps) {
+    // Everything Momo says is remembered, whoever says it (the assistant or a skill).
+    const send = deps.outbound.send.bind(deps.outbound);
+    deps = { ...deps, outbound: { ...deps.outbound, send: async (channel, to, text) => { await send(channel, to, text); await this.note("momo", text); } } };
     this.d = deps;
     const now = deps.now ?? (() => new Date());
     this.ctx = {
@@ -100,6 +128,7 @@ export class Assistant {
           ? `To pay, add the card you want me to use. It's encrypted on your phone, I never see the number, and I still ask before every purchase:\n${link.url}`
           : `Where should it go? Add your address here (saved for next time):\n${link.url}`;
       },
+      recentConversation: () => this.recentConversation(),
       liveViews: deps.liveViews,
       phone: deps.phone,
       inbox: deps.inbox,
@@ -138,6 +167,22 @@ export class Assistant {
       if (claim === "wrong") await say("That code didn't match. Check the code on your computer.");
       // Everyone else: not ours to answer; the host decides.
       return { handled: claim !== "none" };
+    }
+
+    await this.note("owner", text);
+
+    // Fix what Momo knows about you, any time.
+    const rename = /^(?:call me|my name is|my name'?s)\s+(.{1,60}?)[.!]*$/i.exec(text);
+    if (rename) {
+      await this.d.memory.set("owner.name", rename[1]!.trim());
+      await say(`Got it, ${rename[1]!.trim()}.`);
+      return { handled: true };
+    }
+    const moved = /^(?:i live in|i'?m in|i am in|my city is|i moved to)\s+(.{1,80}?)[.!]*$/i.exec(text);
+    if (moved && (await this.d.owners.state()).onboarding === "done") {
+      await this.d.memory.set("owner.city", moved[1]!.trim());
+      await say(`Got it, you're in ${moved[1]!.trim()}.`);
+      return { handled: true };
     }
 
     if (/^(stop|stop all|cancel all|abort)$/i.test(text)) {
@@ -222,12 +267,16 @@ export class Assistant {
       }
     }
 
-    const skill = this.d.skills.find((s) => s.matches(text));
+    // "did you book it?" is a question about what happened, not a new booking.
+    const asking = !!this.d.answer && ASKING.test(text) && text.length < 80;
+    const skill = asking ? undefined : this.d.skills.find((s) => s.matches(text));
     if (!skill && (await this.onboard(text, say))) return { handled: true };
     if (!skill && this.d.answer) {
       const name = await this.d.memory.get("owner.name");
       const city = await this.d.memory.get("owner.city");
-      await say(await this.d.answer(text, [name && `Owner: ${name}.`, city && `City: ${city}.`, `Now: ${this.ctx.now().toString()}`].filter(Boolean).join(" ")));
+      const recent = await this.recentConversation();
+      const context = [name && `Owner: ${name}.`, city && `City: ${city}.`, `Now: ${this.ctx.now().toString()}`, recent && `\nRecent conversation (oldest first):\n${recent}`].filter(Boolean).join(" ");
+      await say((await this.d.answer(text, context)) || "I'm not sure what you mean. Tell me what you'd like done, in a sentence.");
       return { handled: true };
     }
     if (!skill) return { handled: false };
