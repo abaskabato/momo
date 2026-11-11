@@ -12,6 +12,7 @@ export interface KV {
   getdel(key: string): Promise<string | null>;
   del(...keys: string[]): Promise<number>;
   lpush(key: string, ...values: string[]): Promise<number>;
+  rpush(key: string, ...values: string[]): Promise<number>;
   lmove(src: string, dst: string, from: "RIGHT", to: "LEFT"): Promise<string | null>;
   blmove(src: string, dst: string, from: "RIGHT", to: "LEFT", timeoutS: number): Promise<string | null>;
   lrem(key: string, count: number, value: string): Promise<number>;
@@ -21,6 +22,8 @@ export interface KV {
   /** A connection for blocking calls (Redis); the same store for FileKV. */
   duplicate(): KV;
   disconnect(): void;
+  /** True when this process is the only one using the store (FileKV), so leftovers from a crash are its own. */
+  readonly exclusive?: boolean;
 }
 
 interface Data {
@@ -30,6 +33,7 @@ interface Data {
 }
 
 export class FileKV implements KV {
+  readonly exclusive = true;
   private readonly path?: string;
   private readonly d: Data;
   private readonly waiters = new Set<() => void>();
@@ -118,6 +122,13 @@ export class FileKV implements KV {
   async lpush(key: string, ...values: string[]) {
     const l = (this.d.list[key] ??= []);
     l.unshift(...values.reverse());
+    this.changed();
+    return l.length;
+  }
+
+  async rpush(key: string, ...values: string[]) {
+    const l = (this.d.list[key] ??= []);
+    l.push(...values);
     this.changed();
     return l.length;
   }

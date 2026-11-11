@@ -10,7 +10,7 @@ import { after, before, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac, randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
-import { fromRedis } from "../src/hosted/kv.ts";
+import { FileKV, fromRedis } from "../src/hosted/kv.ts";
 import { WEB_SEAL_SOURCE } from "@momo/protocol";
 import {
   HeadlessBrowser,
@@ -252,6 +252,31 @@ test("a broken AI setting never means silence: the person is told what's wrong",
   assert.match(await tg(app, rt, "how are you?"), /model name in Momo's settings doesn't exist/);
   assert.match(failureText(new Error("gemini 429: quota exceeded")), /out of quota/);
   assert.match(failureText(new Error("openai 401: invalid api key")), /key was refused/);
+});
+
+test("on a person's computer (file store): a backlog of texts from one person is answered, in order, not stuck", { timeout: 30_000 }, async () => {
+  const kv = new FileKV();
+  const { rt, app } = runtime(scriptedBooking(site.origin), () => FRIDAY_NOON, { redis: kv });
+  const text = (t: string) =>
+    app.request("/v1/hosted/telegram", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "tg-secret" },
+      body: JSON.stringify({ update_id: ++updateId, message: { text: t, date: 1, chat: { id: 777, type: "private" } } }),
+    });
+  // Texts piled up while Momo was off; Telegram delivers them all at once.
+  for (const t of ["hi", "Ana", "San Francisco", "help", "help"]) await text(t);
+  // And a copy that was killed mid-message left its token, its lock and the half-done message behind.
+  const stuck = await kv.lmove("hosted:jobs", "hosted:processing", "RIGHT", "LEFT");
+  const uid = (JSON.parse(stuck!) as { uid: string }).uid;
+  await kv.set(`lock:${uid}`, "a-dead-process", "PX", 600_000, "NX");
+  await kv.lmove(`q:${uid}`, `p:${uid}`, "RIGHT", "LEFT");
+  void rt.run(8);
+  for (let i = 0; i < 100 && sent.length < 5; i++) await new Promise((r) => setTimeout(r, 100));
+  rt.stop();
+  assert.equal(sent.length, 5, `every text gets a reply; got:\n${sent.map((m) => m.text).join("\n---\n")}`);
+  assert.match(sent[0]!.text, /Hi, I'm Momo/);
+  assert.match(sent[1]!.text, /Nice to meet you, Ana/);
+  assert.match(sent[2]!.text, /All set/);
 });
 
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {

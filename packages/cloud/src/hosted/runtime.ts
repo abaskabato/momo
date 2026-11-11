@@ -77,6 +77,8 @@ export interface HostedOptions {
 export class HostedRuntime {
   private readonly o: HostedOptions;
   private running = false;
+  /** Identifies this process's locks, so one left by a killed copy can be told apart. */
+  private readonly bootId = randomBytes(8).toString("hex");
   /**
    * Live views of in-progress errands, by unguessable id. In memory: the web
    * and worker roles share a process, and the browser page lives here too.
@@ -114,7 +116,9 @@ export class HostedRuntime {
   }
 
   private async enqueue(uid: string, job: Job): Promise<void> {
-    await this.o.redis.lpush("hosted:jobs", JSON.stringify({ uid, blob: this.o.keys.encrypt(uid, "job", JSON.stringify(job)) }));
+    // The work goes on the person's own queue (so it stays in order); the shared queue only says who has work.
+    await this.o.redis.lpush(`q:${uid}`, this.o.keys.encrypt(uid, "job", JSON.stringify(job)));
+    await this.o.redis.lpush("hosted:jobs", JSON.stringify({ uid }));
   }
 
   /** Process queued jobs until the queue is empty (tests, cron-style workers). */
@@ -127,6 +131,15 @@ export class HostedRuntime {
   /** Long-running worker loops; `concurrency` errands run at once. */
   async run(concurrency = 1): Promise<void> {
     this.running = true;
+    if (this.o.redis.exclusive) {
+      // Only this process uses the store: tokens mid-flight are left over from a copy that was killed.
+      // Put them back and drop their locks, before any worker starts.
+      for (;;) {
+        const token = await this.o.redis.lmove("hosted:processing", "hosted:jobs", "RIGHT", "LEFT");
+        if (!token) break;
+        await this.o.redis.del(`lock:${(JSON.parse(token) as { uid: string }).uid}`);
+      }
+    }
     const loop = async (first: boolean) => {
       // A blocking pop holds its connection, so each loop waits on its own.
       const waiter = this.o.redis.duplicate();
@@ -193,26 +206,50 @@ export class HostedRuntime {
     return due;
   }
 
+  /**
+   * Take one "this person has work" token and handle everything queued for them,
+   * strictly in the order it arrived. One worker per person at a time: a token
+   * for someone already being handled is dropped, because that worker will get
+   * to their new messages itself.
+   */
   private async step(blockS: number, waiter: KV = this.o.redis): Promise<boolean> {
-    const raw = blockS
+    const token = blockS
       ? await waiter.blmove("hosted:jobs", "hosted:processing", "RIGHT", "LEFT", blockS)
       : await this.o.redis.lmove("hosted:jobs", "hosted:processing", "RIGHT", "LEFT");
-    if (!raw) return false;
-    const { uid, blob } = JSON.parse(raw) as { uid: string; blob: string };
-    // One job at a time per user, across all workers.
-    const locked = await this.o.redis.set(`lock:${uid}`, "1", "PX", LOCK_MS, "NX");
-    if (!locked) {
-      await this.o.redis.lrem("hosted:processing", 1, raw);
-      await this.o.redis.lpush("hosted:jobs", raw);
+    if (!token) return false;
+    const { uid } = JSON.parse(token) as { uid: string };
+    const lock = `lock:${uid}`;
+    const mine = await this.o.redis.set(lock, this.bootId, "PX", LOCK_MS, "NX");
+    if (!mine) {
+      await this.o.redis.lrem("hosted:processing", 1, token);
       return true;
     }
+    const queue = `q:${uid}`;
+    const current = `p:${uid}`;
     try {
-      await this.process(uid, JSON.parse(this.o.keys.decrypt(uid, "job", blob)) as Job);
-    } catch (e) {
-      this.o.log?.(`job for ${uid.slice(0, 8)} failed: ${(e as Error).message}`);
+      for (;;) {
+        // A job left in "current" was interrupted (crash, kill): do it again before anything newer.
+        const blob = (await this.o.redis.lmove(current, current, "RIGHT", "LEFT")) ?? (await this.o.redis.lmove(queue, current, "RIGHT", "LEFT"));
+        if (!blob) break;
+        await this.o.redis.set(lock, this.bootId, "PX", LOCK_MS);
+        try {
+          await this.process(uid, JSON.parse(this.o.keys.decrypt(uid, "job", blob)) as Job);
+        } catch (e) {
+          this.o.log?.(`job for ${uid.slice(0, 8)} failed: ${(e as Error).message}`);
+        }
+        await this.o.redis.del(current);
+      }
     } finally {
-      await this.o.redis.del(`lock:${uid}`);
-      await this.o.redis.lrem("hosted:processing", 1, raw);
+      await this.o.redis.del(lock);
+      await this.o.redis.lrem("hosted:processing", 1, token);
+    }
+    // Something may have arrived between the last look and letting go: make sure someone comes back for it.
+    // (Moved to "current", which is exactly where the next worker looks first, so order is kept.)
+    // Only while holding the lock again, so a worker that has already taken over isn't disturbed.
+    if (await this.o.redis.set(lock, this.bootId, "PX", LOCK_MS, "NX")) {
+      const late = await this.o.redis.lmove(queue, current, "RIGHT", "LEFT");
+      if (late) await this.o.redis.lpush("hosted:jobs", token);
+      await this.o.redis.del(lock);
     }
     return true;
   }
