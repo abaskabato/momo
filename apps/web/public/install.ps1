@@ -76,9 +76,11 @@ if ($env:MOMO_ZIP) { Copy-Item $env:MOMO_ZIP "$Tmp\momo.zip" }
 else { Invoke-WebRequest "https://codeload.github.com/$Repo/zip/refs/heads/$Ref" -OutFile "$Tmp\momo.zip" -UseBasicParsing }
 Expand-Archive "$Tmp\momo.zip" -DestinationPath $Tmp
 $App = Join-Path $Dir "app"
-# Stop a running Momo before replacing its files.
+# Stop every running Momo before replacing its files: two copies would fight over the same bot.
+Stop-ScheduledTask -TaskName "Momo" -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like "*$App*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  Where-Object { $_.CommandLine -like "*packages*cloud*src*main.ts*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Seconds 2
 if (Test-Path $App) { Remove-Item -Recurse -Force $App }
 Move-Item (Get-ChildItem $Tmp -Directory | Select-Object -First 1).FullName $App
 Remove-Item -Recurse -Force $Tmp

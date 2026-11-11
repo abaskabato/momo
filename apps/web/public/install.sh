@@ -102,6 +102,9 @@ LOG="$DIR/momo.log"
 : > "$LOG"
 STOP=""
 
+# Stop any copy started by hand: two copies would fight over the same bot.
+pkill -f "packages/cloud/src/main.ts" 2>/dev/null || true
+
 # 4. Start in the background, and at every login
 if [ -n "${MOMO_NO_SERVICE:-}" ]; then
   NOSVC=1

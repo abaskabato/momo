@@ -106,6 +106,7 @@ export class HostedRuntime {
       }
     }
     const uid = userIdFor(m.channel, m.from);
+    this.o.log?.(`${new Date().toISOString().slice(11, 19)} text received on ${m.channel}`);
     // Who to reply to, kept encrypted so the routing table holds no phone numbers.
     await this.o.redis.set(`user:${uid}`, this.o.keys.encrypt(uid, "route", JSON.stringify({ channel: m.channel, handle: m.from })));
     await this.enqueue(uid, { kind: "message", channel: m.channel, from: m.from, text: m.text, at: m.at });

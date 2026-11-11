@@ -141,7 +141,9 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
         const me = await telegram.me();
         const mode = env.TELEGRAM_MODE || (isPublic ? "webhook" : "polling");
         if (mode === "webhook") await telegram.setWebhook(`${baseUrl.replace(/\/$/, "")}/v1/hosted/telegram`);
-        else void telegram.poll((m) => runtime.accept(m), stop.signal, (e) => console.error(`telegram poll: ${e.message}`));
+        else void telegram.poll((m) => runtime.accept(m), stop.signal, (e) =>
+            console.error(/conflict/i.test(e.message) ? "telegram: ANOTHER COPY of this bot is running somewhere (another Momo, or another computer). Stop it: only one can receive texts." : `telegram poll: ${e.message}`),
+          );
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
