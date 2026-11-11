@@ -294,7 +294,7 @@ test(`shopping errand via ${via}: texted code, human check via live view, addres
 }
 
 test("no online booking: Momo phones the restaurant, then adds it to the calendar", { timeout: 60_000 }, async () => {
-  const calls: Array<{ to: string; goal: string; webhookUrl: string }> = [];
+  const calls: Array<{ to: string; goal: string; webhookUrl?: string }> = [];
   const voice: VoiceProvider = {
     async start(req) {
       calls.push(req);
@@ -330,7 +330,7 @@ test("no online booking: Momo phones the restaurant, then adds it to the calenda
   assert.ok(!(await tg(app, rt, "thanks!")).startsWith("Booked"));
 
   // The voice provider reports back on the single-use webhook.
-  const hook = new URL(calls[0]!.webhookUrl).pathname;
+  const hook = new URL(calls[0]!.webhookUrl!).pathname;
   const res = await app.request(hook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ summary: "Booked for 2 at 8pm under Ana." }) });
   assert.equal(res.status, 200);
   assert.equal((await app.request(hook, { method: "POST", body: "{}" })).status, 404, "webhook is single-use");
@@ -468,4 +468,46 @@ test("full access to the PC: Momo looks freely, shows every change word for word
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("phone calls from a person's own computer: no webhook; Momo asks the provider how the call went", { timeout: 60_000 }, async () => {
+  const started: Array<{ to: string; goal: string; webhookUrl?: string }> = [];
+  let ended = false;
+  const voice: VoiceProvider = {
+    async start(req) {
+      started.push(req);
+      return "call-123";
+    },
+    async check(id) {
+      assert.equal(id, "call-123");
+      return ended ? { summary: "They can see Ana's son Thursday at 3:30pm for a hearing evaluation." } : null;
+    },
+    outcome: (b) => `Phone call ended. Summary: ${(b as { summary: string }).summary}`,
+  };
+  const { planner } = scripted(`${shop.origin}/zuni`, (prev, r) => {
+    switch (prev.name) {
+      case "goto":
+        return ["request_approval", { summary: "Call Kitsap Audiology at +1 360 555 0142 to book a pediatric hearing evaluation?", amount_usd: 0 }];
+      case "request_approval":
+        return ["call_phone", { number: "+1 360 555 0142", goal: "Book a pediatric hearing evaluation; any afternoon this week." }];
+      case "call_phone":
+        assert.match(r, /Thursday at 3:30pm/);
+        return ["finish", { message: "Booked by phone: hearing evaluation, Thursday 3:30pm at Kitsap Audiology." }];
+    }
+    throw new Error(`planner: unexpected state after ${prev.name}`);
+  });
+  const { rt, app } = runtime(planner, voice, { baseUrl: "http://localhost:8787" });
+
+  // "call ..." is an errand now, and still needs a YES before anyone is phoned.
+  assert.match(await tg(app, rt, "call the audiologist and book a hearing evaluation"), /Call Kitsap Audiology.*Reply YES/s);
+  assert.equal(started.length, 0);
+  assert.match(await tg(app, rt, "yes"), /^Calling \+1 360 555 0142 now\./);
+  assert.equal(started[0]!.webhookUrl, undefined, "no webhook: this computer has no public address");
+
+  assert.equal(await rt.pollCalls(), 0, "still ringing");
+  ended = true;
+  assert.equal(await rt.pollCalls(), 1);
+  await rt.drain();
+  assert.equal(sent.at(-1)!.text, "Booked by phone: hearing evaluation, Thursday 3:30pm at Kitsap Audiology.");
+  assert.equal(await rt.pollCalls(), 0, "followed up once");
 });

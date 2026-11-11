@@ -200,7 +200,7 @@ export class WebTaskSkill implements Skill {
   matches(text: string): boolean {
     if (this.pc && /\b(find|search|look|check|list|show|clean|free up|disk|space|storage|zip|unzip|extract|convert|run|script|battery|wifi|process|program|photos?|pictures?|music|videos?|downloads?|documents?|pdf)\b/i.test(text)) return true;
     if ((this.computers || this.pc) && /\b(open|launch|write|draft|type up|edit|save|rename|move|copy|delete|file|folder|document|spreadsheet|calculator|calculate|install|update|settings|app|desktop|computer|screen|text|message|email|reply|send|post|share|print|scan|play|record|download|upload|back ?up|organi[sz]e)\b/i.test(text)) return true;
-    return /\b(buy|order|purchase|book|reserve|schedule|sign me up|sign up|register|cancel|renew|pay|return|refund|apply|fill out|submit|subscribe|unsubscribe|rebook|reorder|get me)\b/i.test(text);
+    return /\b(call|phone|ring|buy|order|purchase|book|reserve|schedule|sign me up|sign up|register|cancel|renew|pay|return|refund|apply|fill out|submit|subscribe|unsubscribe|rebook|reorder|get me)\b/i.test(text);
   }
 
   async start(task: Task, ctx: SkillContext): Promise<void> {
@@ -535,7 +535,7 @@ export class WebTaskSkill implements Skill {
         return { pause: "live" };
       }
       case "call_phone": {
-        if (!ctx.phone) return { result: "Phone calls aren't set up. Try another website instead.", error: true };
+        if (!ctx.phone) return { result: "Phone calls aren't set up on this Momo (it needs a BLAND_API_KEY in its settings). Try a website instead, or tell the owner the number to call.", error: true };
         const refused = await this.useApproval(task, ctx);
         if (refused) return { result: `Refused: calling commits. ${refused}`, error: true };
         await ctx.phone.call(task, { to: String(i.number), goal: String(i.goal) });

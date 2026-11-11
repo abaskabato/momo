@@ -183,6 +183,7 @@ async function settings() {
   lines.push(`MOMO_MASTER_KEY=${b64(crypto.getRandomValues(new Uint8Array(32)))}`, "MOMO_SINGLE_OWNER=1");
   if ($("where").value !== "web") lines.push("MOMO_DESKTOP=local");
   if ($("where").value === "full") lines.push("MOMO_ACCESS=full");
+  if ($("bland").value.trim()) lines.push(`BLAND_API_KEY=${$("bland").value.trim()}`);
   if (relay) lines.push(`MOMO_RELAY_URL=${origin}`, `MOMO_RELAY_TOKEN=${relay.token}`);
   else say(st, "Note: this site's relay didn't answer, so secure links will only open on this computer.");
   return { text: lines.join("\n") + "\n", relay };

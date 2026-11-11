@@ -1,11 +1,18 @@
 // Phone calls for errands a website can't do: a voice agent calls the
-// business with the planner's goal, and the outcome comes back on a webhook
-// that resumes the task. Providers are pluggable; Bland is the default.
+// business with the planner's goal, and the outcome resumes the task. On a
+// server the provider posts the outcome to a webhook; on a person's own
+// computer (no public address) Momo asks the provider how the call went.
+// Providers are pluggable; Bland is the default.
 
 export interface VoiceProvider {
-  /** Start a call; the provider POSTs the outcome to webhookUrl when it ends. */
-  start(req: { to: string; goal: string; webhookUrl: string }): Promise<void>;
-  /** Webhook body -> a short plain-text outcome for the planner. */
+  /**
+   * Start a call. With webhookUrl, the provider POSTs the outcome there when
+   * it ends. Returns the provider's id for the call, when it has one.
+   */
+  start(req: { to: string; goal: string; webhookUrl?: string }): Promise<string | void>;
+  /** Without a webhook: the call's outcome body once it has ended, or null while it's still going. */
+  check?(callId: string): Promise<unknown | null>;
+  /** Outcome body -> a short plain-text outcome for the planner. */
   outcome(body: unknown): string;
 }
 
@@ -23,7 +30,7 @@ export class BlandVoice implements VoiceProvider {
     this.fetchImpl = fetchImpl;
   }
 
-  async start(req: { to: string; goal: string; webhookUrl: string }): Promise<void> {
+  async start(req: { to: string; goal: string; webhookUrl?: string }): Promise<string | void> {
     if (!/^\+\d{8,15}$/.test(req.to.replace(/[\s()-]/g, ""))) throw new Error(`not a phone number: ${req.to}`);
     const res = await this.fetchImpl("https://api.bland.ai/v1/calls", {
       method: "POST",
@@ -31,12 +38,21 @@ export class BlandVoice implements VoiceProvider {
       body: JSON.stringify({
         phone_number: req.to.replace(/[\s()-]/g, ""),
         task: `${CALLER_RULES}\n\nGoal: ${req.goal}`,
-        webhook: req.webhookUrl,
+        ...(req.webhookUrl && { webhook: req.webhookUrl }),
         wait_for_greeting: true,
         max_duration: 10,
       }),
     });
-    if (!res.ok) throw new Error(`call failed to start (${res.status})`);
+    const body = (await res.json().catch(() => ({}))) as { call_id?: string; message?: string };
+    if (!res.ok) throw new Error(`call failed to start (${res.status}${body.message ? `: ${body.message}` : ""})`);
+    return body.call_id;
+  }
+
+  async check(callId: string): Promise<unknown | null> {
+    const res = await this.fetchImpl(`https://api.bland.ai/v1/calls/${encodeURIComponent(callId)}`, { headers: { authorization: this.apiKey } });
+    if (!res.ok) throw new Error(`couldn't check the call (${res.status})`);
+    const b = (await res.json()) as { completed?: boolean; status?: string };
+    return b.completed || /^(completed|failed|no-answer|busy|canceled|cancelled)$/i.test(b.status ?? "") ? b : null;
   }
 
   outcome(body: unknown): string {

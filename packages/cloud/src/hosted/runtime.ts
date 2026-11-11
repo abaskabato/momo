@@ -63,6 +63,8 @@ export interface HostedOptions {
   singleOwner?: boolean;
   /** Phone calls for errands a website can't do. */
   voice?: VoiceProvider;
+  /** How often to ask the voice provider about calls in progress (no public address). */
+  callPollMs?: number;
   /**
    * Momo's website on Vercel (apps/web). When this server has no public
    * address (a person's own computer), secure links go through it: the page
@@ -163,7 +165,39 @@ export class HostedRuntime {
         await new Promise((r) => setTimeout(r, this.o.relay?.pollMs ?? 2000));
       }
     };
-    await Promise.all([relay(), ...Array.from({ length: Math.max(1, concurrency) }, (_, i) => loop(i === 0))]);
+    const calls = async () => {
+      while (this.running && this.o.voice?.check && !this.isPublic()) {
+        try {
+          await this.pollCalls();
+        } catch (e) {
+          this.o.log?.(`calls: ${(e as Error).message}`);
+        }
+        await new Promise((r) => setTimeout(r, this.o.callPollMs ?? 8000));
+      }
+    };
+    await Promise.all([relay(), calls(), ...Array.from({ length: Math.max(1, concurrency) }, (_, i) => loop(i === 0))]);
+  }
+
+  /** Phone calls started without a webhook: resume the errand of each one that has ended. */
+  async pollCalls(): Promise<number> {
+    const voice = this.o.voice;
+    if (!voice?.check) return 0;
+    let ended = 0;
+    for (const token of await this.o.redis.zrangebyscore("hosted:calls", "-inf", "+inf")) {
+      const raw = await this.o.redis.get(`call:${token}`);
+      if (!raw) {
+        await this.o.redis.zrem("hosted:calls", token);
+        continue;
+      }
+      const { uid, taskId, id } = JSON.parse(raw) as { uid: string; taskId: string; id: string };
+      const body = await voice.check(id);
+      if (body === null) continue;
+      await this.o.redis.zrem("hosted:calls", token);
+      await this.o.redis.del(`call:${token}`);
+      await this.enqueue(uid, { kind: "resume", taskId, text: voice.outcome(body) });
+      ended++;
+    }
+    return ended;
   }
 
   /** Collect sealed answers to open secure links from the relay. */
@@ -273,8 +307,17 @@ export class HostedRuntime {
       phone: this.o.voice && {
         call: async (task, req) => {
           const token = randomBytes(16).toString("base64url");
+          const voice = this.o.voice!;
+          if (!this.isPublic() && voice.check) {
+            // No public address for a webhook: remember the call and ask the provider how it went.
+            const id = await voice.start(req);
+            if (!id) throw new Error("the call started but can't be followed up");
+            await this.o.redis.set(`call:${token}`, JSON.stringify({ uid, taskId: task.id, id }), "EX", CALL_TTL_S);
+            await this.o.redis.zadd("hosted:calls", Date.now() + CALL_TTL_S * 1000, token);
+            return;
+          }
           await this.o.redis.set(`call:${token}`, JSON.stringify({ uid, taskId: task.id }), "EX", CALL_TTL_S);
-          await this.o.voice!.start({ ...req, webhookUrl: `${this.base()}/v1/hosted/calls/${token}` });
+          await voice.start({ ...req, webhookUrl: `${this.base()}/v1/hosted/calls/${token}` });
         },
       },
       publicUrl: this.linkBase(),

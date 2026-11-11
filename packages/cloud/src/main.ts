@@ -150,6 +150,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           );
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
+      notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses, after your YES)" : "phone calls: off (add BLAND_API_KEY to turn them on)");
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
       if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
       else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");

@@ -94,11 +94,13 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 - **Live view** (Momo shows you its browser so you can tap through a CAPTCHA)
   works everywhere: through the website when the computer has no public
   address, straight from the server when it has one.
-- **Phone calls** (`BLAND_API_KEY`) and **inbound email**
-  (`MOMO_EMAIL_DOMAIN`) need a server with a public address, because outside
-  services have to call it back. On a personal computer, texted codes and
-  secure links still work; Momo asks you for a code instead of reading it
-  from an inbox.
+- **Phone calls** (`BLAND_API_KEY`, optional on the setup page): for places
+  with no online booking, a voice agent phones them with your request, only
+  after your YES, and Momo texts you how it went. Works on a personal
+  computer (Momo asks the provider how the call went) and on a server (the
+  provider calls back). Billed by Bland per minute.
+- **Inbound email** (`MOMO_EMAIL_DOMAIN`) needs a server with a public
+  address. On a personal computer Momo asks you for emailed codes instead.
 - `.env.example` documents every setting.
 - `npm run eval` measures how many real errands get done. It never buys or
   books: it stops at every "Reply YES". It needs a paid model key.
