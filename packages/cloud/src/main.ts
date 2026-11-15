@@ -121,7 +121,9 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const pc = env.MOMO_ACCESS === "full" ? new LocalPc() : undefined;
   // On the owner's own computer commands run without a question each (deleting, uninstalling and replacing
   // files still ask). MOMO_ASK=commands goes back to asking before every change.
-  const web = new WebTaskSkill(planner, browser, computers, pc, { freeCommands: env.MOMO_ASK !== "commands" });
+  // A free reservation or appointment the owner asked for is made without a YES first, then reported with how
+  // to cancel; anything that costs money, sends a message or places a call still asks. MOMO_ASK=bookings asks again.
+  const web = new WebTaskSkill(planner, browser, computers, pc, { freeCommands: env.MOMO_ASK !== "commands", freeBookings: !env.MOMO_ASK });
   const runtime = new HostedRuntime({
     redis: kv,
     keys: new UserKeys(Buffer.from(master, "base64")),

@@ -209,7 +209,7 @@ export class Assistant {
         await deps.pendingForms.update((all) => all.concat({ id: link.id, kind, label: what, taskId: task.id, createdAt: now().getTime() }));
         return kind === "card"
           ? `To pay, add the card you want me to use. It's encrypted on your phone, I never see the number, and I still ask before every purchase:\n${link.url}`
-          : `Where should it go? Add your address here (saved for next time):\n${link.url}`;
+          : `This one gets delivered, so I need an address to put on the order. Add it here (saved for next time):\n${link.url}`;
       },
       recentConversation: () => this.recentConversation(),
       liveViews: deps.liveViews,

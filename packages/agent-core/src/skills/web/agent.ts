@@ -105,7 +105,7 @@ export const WEB_TOOLS: ToolSpec[] = [
   { name: "remember", description: "Save a lasting preference so next time needs fewer questions (e.g. party_size=2, seating=outdoor, coffee=oat latte).", input_schema: obj({ key: str, value: str }, ["key", "value"]) },
   { name: "add_to_calendar", description: "Attach an add-to-calendar link for a booked time to your finish message. start/end are local times YYYY-MM-DDTHH:MM.", input_schema: obj({ title: str, start: str, end: str, location: str }, ["title", "start"]) },
   { name: "ask_owner", description: "Ask the owner one short question and wait for the answer. Only when you truly can't decide; use what you know about them first.", input_schema: obj({ question: str }, ["question"]) },
-  { name: "request_approval", description: "Before the final commit, state exactly what will happen and the total cost in USD (0 if free). Waits for the owner's YES.", input_schema: obj({ summary: str, amount_usd: num }, ["summary", "amount_usd"]) },
+  { name: "request_approval", description: "Before the final commit, state exactly what will happen, the total cost in USD (0 if free) and what kind of thing it is: booking (a reservation or appointment), purchase, message (sending or posting something to people), or other. A free booking the owner asked for may go straight through; everything else waits for the owner's YES.", input_schema: obj({ summary: str, amount_usd: num, kind: { type: "string", enum: ["booking", "purchase", "message", "other"] } }, ["summary", "amount_usd"]) },
   { name: "finish", description: "Done. Message the owner the outcome in 1-3 plain sentences with any confirmation number.", input_schema: obj({ message: str }, ["message"]) },
 ];
 
@@ -125,8 +125,9 @@ Do the whole errand yourself, start to finish, without going back and forth: the
 Start acting at once: your first move is a tool call, never a question. If you know the site, goto it; if not, search (goto https://html.duckduckgo.com/html/?q=your+search+words) and pick a result. Fill gaps with sensible defaults from what you know about the owner (their city, today's date, their preferences) and say what you assumed when you finish; ask the owner only when you are truly blocked or a wrong guess would cost money.
 On the owner's own computer your browser tools drive a real Chrome or Edge window that carries their sign-ins. If they say "use my regular browser", that is this window: use goto, never start another browser with a command. If a site isn't signed in there, call sign_in rather than hunting through browser profiles.
 Work step by step: goto, read_page, then act on element numbers (select_option for dropdowns, press_key Enter to search). Use screenshot when the layout matters (calendars, seat maps, unclear pages). Be decisive; prefer the obvious choice that matches the request and the owner's known preferences. Ask the owner only when a wrong guess would matter.
-Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms and total, then do it.
-Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. When a site needs the owner to sign in, call sign_in without hesitating: if no login is saved, the owner is asked for their email and password and you carry on once they send it. Don't give up or work around a sign-in, and don't type passwords or card numbers yourself.
+Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms, total and kind, then do it.
+Questions cost the owner more than a reasonable guess does. Never ask the same thing twice, and never ask for something the errand doesn't need. When a form wants contact details (name, phone, email), use what you know about the owner; if something required is truly missing, ask once, for everything missing, in a single ask_owner, and remember it (remember phone=..., email=...) so it is never asked again. "Near me" or "nearby" means the owner's city or the place they named: never ask for their address to find places.
+Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address, only on a form that takes a delivery or billing address for something being sent to them; a table, a ticket or an appointment needs no address. When a site needs the owner to sign in, call sign_in without hesitating: if no login is saved, the owner is asked for their email and password and you carry on once they send it. Don't give up or work around a sign-in, and don't type passwords or card numbers yourself.
 CAPTCHA or "verify you're human": hand_to_owner, then continue.
 If a site fails (blocked, sold out, broken, no availability), don't give up: find another site that can do it (search with https://html.duckduckgo.com/html/?q=...), or call_phone the business. Tell the owner what you changed.
 When the owner states a lasting preference, remember it. For anything booked at a time, add_to_calendar.
@@ -153,6 +154,12 @@ interface State {
   history: Turn[];
   /** The owner's browser account this errand switched to (use_account). */
   account?: string;
+  /** A free booking the owner asked for: the next submit on a website goes through without a question. */
+  freePass?: boolean;
+  /** Things the owner was asked for and didn't give (a login, an address, a card), with what they said instead. Never asked twice. */
+  declined?: Record<string, { said: string; asks: number }>;
+  /** Which saved detail the errand is waiting for. */
+  secretKind?: "card" | "address";
   /** The owner said "yes to all": commands in this errand run without asking, except ones that destroy things. */
   trustPc?: boolean;
   /** How hard the history is being cut to fit a small AI allowance (0 = not at all). */
@@ -201,13 +208,16 @@ export class WebTaskSkill implements Skill {
 
   /** Commands run without asking (deleting, uninstalling and replacing files still ask). Off = every change asks. */
   private readonly freeCommands: boolean;
+  /** A free reservation or appointment the owner asked for is made without a YES first. Off = it asks. */
+  private readonly freeBookings: boolean;
 
-  constructor(planner: Planner, browser: BrowserSessionFactory, computers?: ComputerFactory, pc?: PcAccess, opts: { freeCommands?: boolean } = {}) {
+  constructor(planner: Planner, browser: BrowserSessionFactory, computers?: ComputerFactory, pc?: PcAccess, opts: { freeCommands?: boolean; freeBookings?: boolean } = {}) {
     this.planner = planner;
     this.browser = browser;
     this.computers = computers;
     this.pc = pc;
     this.freeCommands = !!opts.freeCommands;
+    this.freeBookings = !!opts.freeBookings;
   }
 
   private tools(): ToolSpec[] {
@@ -295,14 +305,24 @@ export class WebTaskSkill implements Skill {
       case "login": {
         const at = this.pages.get(task.id)?.page.url() ?? s.url;
         const saved = at ? await ctx.vault.findLogin(new URL(at).origin).catch(() => undefined) : undefined;
-        result = saved || /^(done|ok|saved|added)\b/i.test(text.trim())
-          ? "The owner saved their login. Call sign_in again."
-          : `The owner hasn't given a login for this site. They said: ${text}`;
+        if (saved || /^(done|ok|saved|added)\b/i.test(text.trim())) result = "The owner saved their login. Call sign_in again.";
+        else {
+          // Asked once. Whatever they said instead is the answer; the same question doesn't go out again.
+          if (at) this.notGiven(s, `login:${new URL(at).origin}`, text);
+          result = `The owner didn't give a login for this site. They said: "${text}". If they are fetching it ("one sec"), call sign_in again to wait for it. Otherwise don't ask again: do what they said, or get the errand done another way (another of their browser accounts, another site), or finish and say in one sentence what is missing.`;
+        }
         break;
       }
-      case "secret":
-        result = "The owner saved it. Call fill_card / fill_address again.";
+      case "secret": {
+        const kind = s.secretKind ?? "address";
+        const have = (await ctx.vault.list(kind === "card" ? "payment" : "address").catch(() => [])).length > 0;
+        if (have) result = "The owner saved it. Call fill_card / fill_address again.";
+        else {
+          this.notGiven(s, kind, text);
+          result = `The owner didn't add their ${kind}. They said: "${text}". If they are fetching it ("one sec"), call the same tool again to wait for it. Otherwise don't ask again: carry on without it if the errand can be done without (a table, a ticket or an appointment needs no ${kind}), or finish and say in one sentence what is missing and why.`;
+        }
         break;
+      }
       case "live":
         result = `The owner finished on the live view${/^(done|ok|finished)\b/i.test(text.trim()) ? "" : ` and said: ${text}`}. Call read_page to see where things are.`;
         break;
@@ -515,7 +535,7 @@ export class WebTaskSkill implements Skill {
             return form ? [...form.querySelectorAll("button, input[type=submit]")].map((b) => (b as HTMLElement).innerText || (b as HTMLInputElement).value).join(" | ") : "";
           });
           if (COMMIT_WORDS.test(submits)) {
-            const refused = await this.useApproval(task, ctx);
+            const refused = await this.useApproval(task, ctx, true);
             if (refused) return { result: `Refused: Enter would submit "${submits}". ${refused}`, error: true };
           }
         }
@@ -539,7 +559,7 @@ export class WebTaskSkill implements Skill {
         const target = el(i.ref);
         const label = `${(await target.innerText().catch(() => "")) || ""} ${(await target.getAttribute("value")) ?? ""}`.trim();
         if (COMMIT_WORDS.test(label)) {
-          const refused = await this.useApproval(task, ctx);
+          const refused = await this.useApproval(task, ctx, true);
           if (refused) return { result: `Refused: "${label}" commits. ${refused}`, error: true };
         }
         await settle(sess.page, () => target.click());
@@ -549,8 +569,12 @@ export class WebTaskSkill implements Skill {
         const origin = new URL(sess.page.url()).origin;
         const login = await ctx.vault.findLogin(origin);
         if (!login) {
+          const before = s.declined?.[`login:${origin}`];
+          if (before && before.asks > 1) return { result: `The owner was asked for this login twice and didn't give it (they said: "${before.said}"). Don't ask again: try another of their browser accounts or another site, or finish and say in one sentence what is missing.`, error: true };
           task.status = "awaiting_input";
-          await ctx.reply(task, await ctx.requestLogin(task, origin, new URL(origin).host));
+          // The same long question is never sent twice: the second time Momo just waits.
+          if (before) before.asks++;
+          await ctx.reply(task, before ? "OK. Text me the login whenever you have it." : await ctx.requestLogin(task, origin, new URL(origin).host));
           return { pause: "login" };
         }
         const user = sess.refs.get(Number(i.user_ref));
@@ -670,6 +694,11 @@ export class WebTaskSkill implements Skill {
         return { pause: "answer" };
       case "request_approval": {
         const amount = Number(i.amount_usd) || 0;
+        if (this.freeBookings && amount === 0 && i.kind === "booking") {
+          // Free, and what the owner asked for: done without a question, and reported with how to undo it.
+          s.freePass = true;
+          return { result: "No need to ask: it's free and it's what the owner asked for. Submit it now. Then finish with exactly what was booked (place, day, time, name, any confirmation number) and how to cancel it." };
+        }
         await ctx.spend.approveCap(task, amount);
         task.status = "awaiting_approval";
         s.approvedArgs = { summary: String(i.summary), amount };
@@ -839,8 +868,12 @@ export class WebTaskSkill implements Skill {
   }
 
   /** One approval, one commit: the gate checks it is approved, unexpired, and unused. Returns why not, if refused. */
-  private async useApproval(task: Task, ctx: SkillContext): Promise<string | undefined> {
+  private async useApproval(task: Task, ctx: SkillContext, website = false): Promise<string | undefined> {
     const s = task.data as unknown as State;
+    if (website && s.freePass) {
+      s.freePass = false; // one submit
+      return undefined;
+    }
     if (!s.commitAllowed || !s.approvedArgs) return "Call request_approval first.";
     await ctx.approvals.consume(task.id, ACTION, s.approvedArgs, Number(s.approvedArgs.amount));
     s.commitAllowed = false;
@@ -849,9 +882,21 @@ export class WebTaskSkill implements Skill {
     return undefined;
   }
 
+  /** The owner answered an ask with something other than what was asked for. */
+  private notGiven(s: State, what: string, said: string): void {
+    const d = (s.declined ??= {});
+    d[what] = { said, asks: d[what]?.asks ?? 1 };
+  }
+
   private async askSecret(task: Task, ctx: SkillContext, kind: "card" | "address"): Promise<Outcome> {
+    const s = task.data as unknown as State;
+    const before = s.declined?.[kind];
+    if (before && before.asks > 1) return { result: `The owner was asked for their ${kind} twice and didn't add it (they said: "${before.said}"). Don't ask again: carry on without it, or finish and say in one sentence what is missing and why.`, error: true };
+    s.secretKind = kind;
     task.status = "awaiting_input";
-    await ctx.reply(task, await ctx.requestSecret(task, kind));
+    // The same question is never sent twice: the second time Momo just waits (the link it sent still works).
+    if (before) before.asks++;
+    await ctx.reply(task, before ? "OK. The link I sent still works, whenever you're ready." : await ctx.requestSecret(task, kind));
     return { pause: "secret" };
   }
 

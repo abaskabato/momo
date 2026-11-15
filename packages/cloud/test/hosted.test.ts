@@ -717,3 +717,67 @@ test("any model: the same errand completes through an OpenAI-compatible provider
   assert.match(await tg(app, rt, "yes"), /^Booked: Nopa, 21:15\. Confirmation TN-/);
   assert.ok(seen.length > 5 && seen.every((r) => r.auth === "Bearer or-key" && r.tools === WEB_TOOLS.length));
 });
+
+test("set and done: a free booking the owner asked for is made without a YES; a message to people still asks", { timeout: 120_000 }, async () => {
+  // The same errand, with the model saying what kind of commit it is and that it costs nothing.
+  const as = (kind: string): Planner => {
+    const inner = scriptedBooking(site.origin);
+    return {
+      async next(system, history, tools) {
+        const out = await inner.next(system, history, tools);
+        for (const b of out) if (b.type === "tool_use" && b.name === "request_approval") b.input = { summary: "Book Nopa, Fri Nov 6, 7pm, 2 people. Free.", amount_usd: 0, kind };
+        return out;
+      },
+    };
+  };
+  const own = (planner: Planner) => runtime(planner, () => FRIDAY_NOON, { skills: () => [new RemindersSkill(), new WebTaskSkill(planner, browser, undefined, undefined, { freeBookings: true })] });
+
+  const { rt, app } = own(as("booking"));
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  site.state.reservations.clear();
+  await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm");
+  const done = await tg(app, rt, `ana@example.com ${PASSWORD}`);
+  assert.match(done, /^Booked: Nopa, 19:00\. Confirmation TN-/);
+  assert.equal(site.state.reservations.size, 1);
+  assert.ok(!sent.some((m) => /Reply YES/.test(m.text)), "no question on the way");
+
+  // Not a booking: the same free commit waits for the owner.
+  await redis.flushdb();
+  sent.length = 0;
+  site.state.reservations.clear();
+  const other = own(as("message"));
+  await tg(other.app, other.rt, "hey");
+  await tg(other.app, other.rt, "Ana");
+  await tg(other.app, other.rt, "San Francisco");
+  await tg(other.app, other.rt, "book a table for 2 at Nopa tonight at 7pm");
+  assert.match(await tg(other.app, other.rt, `ana@example.com ${PASSWORD}`), /Reply YES/);
+  assert.equal(site.state.reservations.size, 0);
+});
+
+test("a question is asked once: 'why do you need it' is an answer, not a reason to send the same question again", { timeout: 60_000 }, async () => {
+  let n = 0;
+  const call = (name: string, input: Record<string, unknown> = {}): Block[] => [{ type: "tool_use", id: `q${++n}`, name, input }];
+  const planner: Planner = {
+    async next(_system, history) {
+      const r = (history.at(-1)!.content.find((b) => b.type === "tool_result") as { content: string } | undefined)?.content ?? "";
+      const prev = history.at(-2)?.content.find((b) => b.type === "tool_use") as { name: string } | undefined;
+      if (!prev) return call("goto", { url: `${site.origin}/search?q=nopa` });
+      if (prev.name === "goto") return call("fill_address", { fields: [] });
+      // A model that keeps wanting the address anyway.
+      if (/twice/.test(r)) return call("finish", { message: "Found Nopa. I went on without an address: a table doesn't need one." });
+      return call("fill_address", { fields: [] });
+    },
+  };
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON);
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  const ask = await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm");
+  assert.match(ask, /I need an address to put on the order\. Add it here/);
+  const second = await tg(app, rt, "why do you need it");
+  assert.equal(second, "OK. The link I sent still works, whenever you're ready.");
+  assert.match(await tg(app, rt, "where what should go?"), /went on without an address/);
+  assert.equal(sent.filter((m) => /Add it here/.test(m.text)).length, 1, "the question went out once");
+});
