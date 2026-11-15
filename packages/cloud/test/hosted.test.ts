@@ -349,6 +349,69 @@ test("a text-only model: the screenshot is dropped and the errand carries on", a
   assert.equal(bodies.length, 3, "it remembers: no second refusal");
 });
 
+test("anything that needs doing becomes an errand, whatever the wording; a link is opened before the model's first move", { timeout: 60_000 }, async () => {
+  const firstTurns: string[] = [];
+  const planner: Planner = {
+    async next(_system, history) {
+      if (history.length === 1) firstTurns.push(JSON.stringify(history[0]));
+      const last = history.at(-1)!.content.find((b) => b.type === "tool_result") as { content: string } | undefined;
+      if (!last) return [{ type: "tool_use", id: "r1", name: "read_page", input: {} } as Block];
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: /Title: (.*)/.exec(last.content)?.[0] ?? "nothing open" } } as Block];
+    },
+  };
+  const hints: string[] = [];
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON, {
+    answer: async (q, context) => {
+      hints.push(context);
+      return /weather|tables/.test(q) ? "DO" : "Abiy Ahmed.";
+    },
+  });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+
+  // No "book/buy/order" in it, but it needs a browser: the model says DO and it becomes an errand.
+  await tg(app, rt, "see if Nopa has tables tonight");
+  assert.ok(sent.some((m) => m.text === "On it."), "started as an errand");
+  assert.match(hints.at(-1)!, /reply with exactly the single word DO/);
+
+  // A plain question is still just answered.
+  assert.equal(await tg(app, rt, "who is the PM of Ethiopia"), "Abiy Ahmed.");
+
+  // A link: the page is already open when the model starts, so read_page works as its very first move.
+  assert.equal(await tg(app, rt, `can you go through this: ${site.origin}/r/nopa`), "Title: Nopa");
+  assert.match(firstTurns.at(-1)!, /The browser is already open on http:\/\/127\.0\.0\.1:\d+\/r\/nopa\. Start with read_page\./);
+});
+
+test("visible browser: one profile kept between errands and restarts; each errand gets its own tab", { timeout: 60_000 }, async () => {
+  const { VisibleBrowser } = await import("@momo/agent-core");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const profileDir = mkdtempSync(join(tmpdir(), "momo-profile-"));
+  try {
+    // (No screen here, so it runs hidden; the profile and tabs behave the same.)
+    const b = new VisibleBrowser({ profileDir, headless: true });
+    const one = await b.open();
+    const two = await b.open();
+    assert.equal(b.started, "hidden");
+    await one.page.goto(`${site.origin}/r/nopa`);
+    await one.page.evaluate(() => localStorage.setItem("signedIn", "ana"));
+    assert.equal(one.page.context(), two.page.context(), "tabs of one browser");
+    await one.close();
+    assert.ok(!two.page.isClosed(), "closing one errand's tab leaves the others");
+    await b.dispose();
+
+    const again = new VisibleBrowser({ profileDir, headless: true });
+    const { page } = await again.open();
+    await page.goto(`${site.origin}/r/nopa`);
+    assert.equal(await page.evaluate(() => localStorage.getItem("signedIn")), "ana", "still signed in after a restart");
+    await again.dispose();
+  } finally {
+    rmSync(profileDir, { recursive: true, force: true });
+  }
+});
+
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {
   const { rt, app } = runtime(scriptedBooking(site.origin), () => now);
   await tg(app, rt, "hi");

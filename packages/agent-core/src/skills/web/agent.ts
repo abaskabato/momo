@@ -116,6 +116,7 @@ export const COMPUTER_TOOLS: ToolSpec[] = [
 ];
 
 export const WEB_SYSTEM = `You are Momo, finishing a real errand for the owner in a web browser. Getting it done is the job.
+Start acting at once: your first move is a tool call, never a question. If you know the site, goto it; if not, search (goto https://html.duckduckgo.com/html/?q=your+search+words) and pick a result. Fill gaps with sensible defaults from what you know about the owner (their city, today's date, their preferences) and say what you assumed when you finish; ask the owner only when you are truly blocked or a wrong guess would cost money.
 Work step by step: goto, read_page, then act on element numbers (select_option for dropdowns, press_key Enter to search). Use screenshot when the layout matters (calendars, seat maps, unclear pages). Be decisive; prefer the obvious choice that matches the request and the owner's known preferences. Ask the owner only when a wrong guess would matter.
 Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms and total, then do it.
 Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. Never ask the owner for passwords or card numbers in chat.
@@ -198,6 +199,7 @@ export class WebTaskSkill implements Skill {
   }
 
   matches(text: string): boolean {
+    if (/https?:\/\/\S+|\bwww\.\S+\.\w{2,}/i.test(text)) return true; // a link is something to open
     if (this.pc && /\b(find|search|look|check|list|show|clean|free up|disk|space|storage|zip|unzip|extract|convert|run|script|battery|wifi|process|program|photos?|pictures?|music|videos?|downloads?|documents?|pdf)\b/i.test(text)) return true;
     if ((this.computers || this.pc) && /\b(open|launch|write|draft|type up|edit|save|rename|move|copy|delete|file|folder|document|spreadsheet|calculator|calculate|install|update|settings|app|desktop|computer|screen|text|message|email|reply|send|post|share|print|scan|play|record|download|upload|back ?up|organi[sz]e)\b/i.test(text)) return true;
     return /\b(call|phone|ring|buy|order|purchase|book|reserve|schedule|sign me up|sign up|register|cancel|renew|pay|return|refund|apply|fill out|submit|subscribe|unsubscribe|rebook|reorder|get me)\b/i.test(text);
@@ -220,6 +222,18 @@ export class WebTaskSkill implements Skill {
     const before = recent ? `\nRecent conversation, for context only (oldest first):\n${recent}\n` : "";
     task.data = { steps: 0, emailSince: ctx.now().getTime() - 2 * 60_000, history: [{ role: "user", content: [{ type: "text", text: `${about}\nToday is ${ctx.now().toDateString()}.${before}\nErrand: ${task.request}` }] }] } satisfies State;
     await ctx.reply(task, "On it.");
+    // A link in the request: have it open before the model's first move, so it starts from the page, not from nothing.
+    const link = /https?:\/\/[^\s<>"')]+/i.exec(task.request)?.[0];
+    if (link) {
+      const s = task.data as unknown as State;
+      try {
+        const sess = await this.session(task.id, s, ctx);
+        await sess.page.goto(link, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        s.history[0]!.content.push({ type: "text", text: `The browser is already open on ${link}. Start with read_page.` });
+      } catch {
+        // the model will open it itself
+      }
+    }
     await this.run(task, ctx);
   }
 

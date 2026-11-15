@@ -63,7 +63,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
-  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, VisibleBrowser, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
@@ -85,8 +85,18 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   if (!telegram && !whatsapp) throw new Error("set TELEGRAM_BOT_TOKEN (or WhatsApp credentials), or set up at your Momo website; run `npm run setup`");
   // MOMO_BROWSER=desktop drives your own Chrome through vercel-labs/agent-desktop
   // (a computer with a screen, one owner). Default: private headless Chromium per errand.
+  // On a person's own computer (no REDIS_URL, a screen): a real, visible browser window they can watch and
+  // step into, with its own profile that keeps sign-ins. MOMO_BROWSER=hidden turns that off; =visible forces it.
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const hasScreen = process.platform === "win32" || process.platform === "darwin" || !!env.DISPLAY || !!env.WAYLAND_DISPLAY;
+  const visible = env.MOMO_BROWSER === "visible" || (!env.MOMO_BROWSER && !env.REDIS_URL && hasScreen);
   const browser =
-    env.MOMO_BROWSER === "desktop" ? new DesktopBrowser(new AgentDesktop(), env.MOMO_DESKTOP_APP || "Google Chrome") : new HeadlessBrowser({ timezoneId: env.TZ || undefined });
+    env.MOMO_BROWSER === "desktop"
+      ? new DesktopBrowser(new AgentDesktop(), env.MOMO_DESKTOP_APP || "Google Chrome")
+      : visible
+        ? new VisibleBrowser({ profileDir: join(env.MOMO_HOME ?? join(homedir(), ".momo"), "browser-profile"), timezoneId: env.TZ || undefined })
+        : new HeadlessBrowser({ timezoneId: env.TZ || undefined });
   // Any model: MOMO_MODEL=provider/model (see agent-core/src/llm.ts). Answers can use a cheaper one.
   const model = env.MOMO_MODEL ?? "anthropic/claude-opus-5-5";
   const planner = createPlanner(model);
@@ -131,7 +141,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     async start(): Promise<string[]> {
       const notes: string[] = [
         `model: ${model}`,
-        `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : "headless Chromium"}`,
+        `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : visible ? "a visible window on this computer (Chrome or Edge, Momo's own profile; you can watch and step in)" : "headless Chromium"}`,
         `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
       ];
       if (pc) notes.push("files and commands: full access to this computer (it looks freely; every change asks for your YES)");

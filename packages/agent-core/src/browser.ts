@@ -49,6 +49,61 @@ export class HeadlessBrowser implements BrowserSessionFactory {
   }
 }
 
+/**
+ * On a person's own computer: a real, visible browser window (their installed
+ * Chrome or Edge) with a profile of Momo's own that is kept between errands.
+ * They can watch it work and step in (sign in once, pass a CAPTCHA) right
+ * there, and sites see an ordinary browser. Each errand gets a tab. If no
+ * installed browser can be started, it falls back to the hidden one.
+ */
+export class VisibleBrowser implements BrowserSessionFactory {
+  private context: Promise<BrowserContext> | null = null;
+  private readonly o: { profileDir: string; channels: string[]; headless: boolean; timezoneId?: string };
+  /** What actually started: "chrome", "msedge", ... or "hidden". */
+  started = "";
+
+  constructor(o: { profileDir: string; channels?: string[]; headless?: boolean; timezoneId?: string }) {
+    this.o = { channels: ["chrome", "msedge", "chromium"], headless: false, ...o };
+  }
+
+  private async launch(): Promise<BrowserContext> {
+    const { chromium } = await import("playwright-core");
+    const base = { viewport: null, timezoneId: this.o.timezoneId, args: ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check"] };
+    for (const channel of this.o.headless ? [] : this.o.channels) {
+      try {
+        const c = await chromium.launchPersistentContext(this.o.profileDir, { ...base, headless: false, channel });
+        this.started = channel;
+        return c;
+      } catch {
+        // not installed, or no screen: try the next one
+      }
+    }
+    this.started = "hidden";
+    return chromium.launchPersistentContext(this.o.profileDir, { ...base, viewport: { width: 1280, height: 860 }, headless: true });
+  }
+
+  async open() {
+    let context = await (this.context ??= this.launch());
+    let page: Page;
+    try {
+      page = await context.newPage();
+    } catch {
+      // The owner closed the window: open it again.
+      this.context = this.launch();
+      context = await this.context;
+      page = await context.newPage();
+    }
+    await page.bringToFront().catch(() => {});
+    return { page, close: () => page.close().catch(() => {}) };
+  }
+
+  async dispose(): Promise<void> {
+    const c = await this.context?.catch(() => undefined);
+    this.context = null;
+    await c?.close().catch(() => {});
+  }
+}
+
 export class DesktopBrowser implements BrowserSessionFactory {
   private readonly desktop: AgentDesktop;
   private readonly app: string;

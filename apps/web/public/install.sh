@@ -85,7 +85,7 @@ mv "$TMP/app" "$DIR/app" && rm -rf "$TMP" "$DIR/app.old"
 say "Installing (a minute or two)…"
 (cd "$DIR/app" && npm ci --omit=dev --no-audit --no-fund --no-update-notifier --loglevel=error)
 export PLAYWRIGHT_BROWSERS_PATH="$DIR/browsers"
-"$NODE" "$DIR/app/node_modules/playwright-core/cli.js" install chromium-headless-shell >/dev/null
+"$NODE" "$DIR/app/node_modules/playwright-core/cli.js" install chromium chromium-headless-shell >/dev/null
 TOOLS_BIN=""
 if grep -q '^MOMO_DESKTOP=local' "$DIR/momo.env"; then
   say "Installing agent-desktop (so Momo can use apps on this screen)…"

@@ -73,6 +73,12 @@ export interface ChatLine {
 }
 const CHAT_KEEP = 24;
 
+/** Added to the answerer's instructions so anything that needs doing becomes an errand, whatever its wording. */
+const DO_HINT =
+  "You can also act: you have a web browser, the owner's computer and apps, and can phone businesses. " +
+  "If this message asks for something that needs any of those (look at a page or site, open or check something, find, compare, book, buy, send, fill in, download, anything on the computer), " +
+  "reply with exactly the single word DO and nothing else, and it will be done. Otherwise just answer.";
+
 /** A question about what happened, not a new errand ("did you book it?", "what is done"). */
 const ASKING = /^(did|have|has|had|what|what'?s|whats|why|when|where|who|how|is|are|was|were|do you|does|any (update|news|luck)|status|so)\b/i;
 
@@ -269,15 +275,22 @@ export class Assistant {
 
     // "did you book it?" is a question about what happened, not a new booking.
     const asking = !!this.d.answer && ASKING.test(text) && text.length < 80;
-    const skill = asking ? undefined : this.d.skills.find((s) => s.matches(text));
+    let skill = asking ? undefined : this.d.skills.find((s) => s.matches(text));
     if (!skill && (await this.onboard(text, say))) return { handled: true };
     if (!skill && this.d.answer) {
+      // Not obviously an errand by its wording: let the model say whether it's something to DO.
+      const doer = asking ? undefined : this.d.skills.find((s) => s.name === "web");
       const name = await this.d.memory.get("owner.name");
       const city = await this.d.memory.get("owner.city");
       const recent = await this.recentConversation();
       const context = [name && `Owner: ${name}.`, city && `City: ${city}.`, `Now: ${this.ctx.now().toString()}`, recent && `\nRecent conversation (oldest first):\n${recent}`].filter(Boolean).join(" ");
-      await say((await this.d.answer(text, context)) || "I'm not sure what you mean. Tell me what you'd like done, in a sentence.");
-      return { handled: true };
+      const reply = await this.d.answer(text, doer ? `${context}\n\n${DO_HINT}` : context);
+      if (doer && /^\W*DO\W*$/i.test(reply.trim())) {
+        skill = doer;
+      } else {
+        await say(reply || "I'm not sure what you mean. Tell me what you'd like done, in a sentence.");
+        return { handled: true };
+      }
     }
     if (!skill) return { handled: false };
     const task = await this.d.tasks.create({ skill: skill.name, channel: msg.channel, threadId: msg.threadId, from: msg.from, request: text });
