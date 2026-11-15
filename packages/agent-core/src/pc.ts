@@ -97,13 +97,21 @@ const READ_ONLY = new Set([
 const UNSAFE_ARGS: Array<[RegExp, RegExp]> = [
   [/^(find)$/, /./], // find isn't on the list at all; kept here so nobody adds it without -delete/-exec in mind
   [/^winget$/, /\b(install|uninstall|upgrade|import|settings|source)\b/i],
-  [/^(env|printenv|get-childitem|gci|dir)$/, /env:|\benv\b.*=/i],
+  // Listing the environment (dir env:) shows keys; naming one variable in a path ($env:LOCALAPPDATA) doesn't.
+  [/^(env|printenv|get-childitem|gci|dir|ls|get-item|gi)$/, /(^|[\s'"(,])env:|\benv\b.*=/i],
   [/^(foreach-object|%|where-object|\?)$/, /\b(remove|delete|set-|new-|move|copy|rename|clear|stop|start|invoke|out-file|add-content|set-content)\b/i],
   [/^(ip|ifconfig)$/, /\b(add|del|set|up|down|flush)\b/i],
 ];
 
 /** Momo's own keys and settings: never shown to the model, with or without approval. */
 const PRIVATE = /\.momo\b|momo\.env|MOMO_MASTER_KEY|_API_KEY|BOT_TOKEN/i;
+
+/** Never run without asking, even after "yes to all": things that destroy data or change who can use the computer. */
+const DESTRUCTIVE = /\b(remove-item|rm|rmdir|rd|del|erase|unlink|shred|sdelete|format|format-volume|clear-content|clear-recyclebin|clear-disk|diskpart|mkfs\w*|dd|uninstall\S*|winget\s+uninstall|shutdown|restart-computer|stop-computer|reboot|halt|poweroff|reg(\.exe)?\s+delete|remove-itemproperty|net\s+user|net\s+localgroup|set-executionpolicy|takeown|icacls|chmod|chown|sudo|runas|git\s+(reset|clean|push)|drop\s+(table|database)|truncate)\b/i;
+
+export function isDestructiveCommand(command: string): boolean {
+  return DESTRUCTIVE.test(command);
+}
 
 export function touchesMomoSecrets(text: string): boolean {
   return PRIVATE.test(text);
@@ -117,11 +125,20 @@ export function touchesMomoSecrets(text: string): boolean {
 export function isReadOnlyCommand(command: string): boolean {
   const c = command.trim();
   if (!c || c.length > 2000) return false;
-  if (/[`]|\$\(|>|<\(|\bsudo\b|\brunas\b|\biex\b|invoke-expression|start-process|&\s*["'{(]/i.test(c)) return false;
+  if (/[`]|<\(|\bsudo\b|\brunas\b|\biex\b|invoke-expression|start-process|&\s*["'{(]/i.test(c)) return false;
+  // "$($_.Name)" inside a string only reads a property; any other $( ... ) could run anything.
+  let bare = c.replace(/\$\(\s*\$[\w:]+(?:\.\w+)*\s*\)/g, "V");
+  if (bare.includes("$(")) return false;
+  // What's inside quotes is text, not commands: a "|" or ";" there separates nothing.
+  bare = bare.replace(/'[^']*'|"[^"]*"/g, "Q");
+  if (/['">]/.test(bare)) return false; // an unclosed quote, or writing to a file
   // Every segment of a pipeline or sequence must itself be read-only.
-  for (const seg of c.split(/\|\||&&|[|;\n]/)) {
-    const s = seg.trim();
-    if (!s) continue;
+  for (const seg of bare.split(/\|\||&&|[|;\n]/)) {
+    // "$x = Get-Content ..." keeps a result for the next step; "$x.a.b" reads from it.
+    const s = seg.trim().replace(/^\$\w+\s*=\s*/, "");
+    if (!s || /^\$[\w:]+(?:\.\w+)*$/.test(s) || /^(Q|\d+)$/.test(s)) continue; // a value: a variable, a string, a number
+    // Method calls ($f.Delete()), .NET calls ([IO.File]::Delete) and further assignments can change things.
+    if (/\.\w+\(|\[[\w.]+\]::|(^|[^=!<>])=(?!=)/.test(s)) return false;
     const m = /^([A-Za-z?%][\w.-]*|\?|%)/.exec(s);
     if (!m) return false;
     const name = m[1]!.toLowerCase().replace(/\.exe$/, "");

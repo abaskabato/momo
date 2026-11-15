@@ -48,8 +48,11 @@ export const DEFAULT_APPROVAL_TTL_MS = 15 * 60_000;
 const AMOUNT_TOLERANCE = 0.05;
 // No 0/O/1/I so tokens survive being read aloud or retyped.
 const TOKEN_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const YES = new Set(["yes", "y", "approve", "approved", "confirm", "go", "go ahead", "do it", "book it", "yes please"]);
+const YES = new Set(["yes", "y", "approve", "approved", "confirm", "go", "go ahead", "do it", "book it", "yes please", "ok", "okay", "k", "sure", "yep", "yeah", "yup", "fine", "please do", "ok go ahead", "yes go ahead"]);
 const NO = new Set(["no", "n", "deny", "cancel", "don't", "dont", "stop", "nope"]);
+
+/** "yes to all", "always", "don't ask again", "make your own decisions". */
+export const YES_TO_ALL = /^(?:(?:yes|yep|ok|okay|approve|allow|go ahead)[\s,]+(?:to\s+|for\s+|with\s+)?(?:all|everything|them all|all of (?:them|it))|always(?: yes| allow)?|(?:please\s+)?(?:don'?t|do not|stop) ask(?:ing)?(?: me)?(?: again| anymore)?|(?:just\s+)?(?:make|use) your own (?:decisions?|judge?ment)|(?:i can'?t answer (?:questions?)?[\s,.]*)?(?:just\s+)?(?:make your own decisions?|you decide|decide yourself))[\s.!]*$/i;
 
 export function hashArgs(action: string, args: Record<string, unknown>): string {
   return createHash("sha256").update(action + "\0" + canonicalJson(args)).digest("hex");
@@ -134,9 +137,19 @@ export class ApprovalGate {
       if (!target) return { kind: "ambiguous", message: `I don't have a pending request with code ${token}.` };
     } else if (pending.length === 1) {
       target = pending[0];
-    } else {
+    } else if (pending.some((a) => (a.amountUsd ?? 0) > 0)) {
+      // Money is involved in at least one: never guess which one a bare yes means.
       const list = pending.map((a) => `${a.token}: ${a.summary.split("\n")[0]}`).join("\n");
       return { kind: "ambiguous", message: `I have ${pending.length} things waiting. Which one?\n${list}` };
+    } else {
+      // No code and nothing costs money: it answers the question asked last, the one on the owner's screen.
+      // Older asks that were never answered are dropped rather than left to pile up.
+      target = pending.reduce((a, b) => (b.createdAt >= a.createdAt ? b : a));
+      for (const a of pending) {
+        if (a.id === target.id) continue;
+        a.status = "expired";
+        await this.save(a);
+      }
     }
 
     target!.status = isYes ? "approved" : "denied";

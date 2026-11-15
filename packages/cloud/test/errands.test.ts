@@ -470,6 +470,50 @@ test("full access to the PC: Momo looks freely, shows every change word for word
   }
 });
 
+test("'yes to all' lets an errand's commands run without asking, except deleting; words instead of yes/no steer the errand", { timeout: 60_000 }, async () => {
+  const home = mkdtempSync(join(tmpdir(), "momo-pc-"));
+  mkdirSync(join(home, "Downloads"));
+  writeFileSync(join(home, "Downloads", "old.tmp"), "junk");
+  const results: string[] = [];
+  const script: Array<[string, Record<string, unknown>]> = [
+    ["pc_run", { command: "mkdir Notes", why: "Make a folder for your notes" }], // asks
+    ["pc_run", { command: "mkdir Notes", why: "Make a folder for your notes" }], // after "YES to all": runs
+    ["pc_run", { command: "mkdir Notes/2026", why: "And one for this year" }], // no asking any more
+    ["pc_run", { command: "rm Downloads/old.tmp", why: "Delete the leftover temp file" }], // deleting still asks
+    ["pc_run", { command: "ls Downloads", why: "look" }], // after "you decide": carries on another way
+    ["finish", { message: "Made your Notes folders. I left the temp file alone." }],
+  ];
+  let n = 0;
+  const planner: Planner = {
+    async next(_system, history) {
+      const last = history.at(-1)!.content.find((b) => b.type === "tool_result") as { content: unknown } | undefined;
+      if (last) results.push(String(last.content));
+      const [name, input] = script[n++]!;
+      return [{ type: "tool_use", id: `p${n}`, name, input } as Block];
+    },
+  };
+  const { rt, app } = runtime(planner, undefined, {}, new LocalPc(home));
+  try {
+    assert.match(await tg(app, rt, "organize my notes folder"), /Command: mkdir Notes\nReply YES/);
+    const before = sent.filter((m) => m.text === "On it.").length;
+
+    // "YES to all" is an answer to the errand, not a new errand.
+    const ask = await tg(app, rt, "YES to all");
+    assert.equal(sent.filter((m) => m.text === "On it.").length, before, "no second errand");
+    assert.ok(sent.some((m) => /For the rest of this errand I'll run commands without asking\. I'll still ask before deleting/.test(m.text)));
+    assert.ok(existsSync(join(home, "Notes", "2026")), "both commands ran without another question");
+    assert.match(ask, /Delete the leftover temp file\nCommand: rm Downloads\/old\.tmp\nReply YES/, "deleting still asks");
+    assert.ok(existsSync(join(home, "Downloads", "old.tmp")));
+
+    // Not a yes or a no: the errand hears it and goes on without that step.
+    assert.equal(await tg(app, rt, "idk, make your own decision"), "Made your Notes folders. I left the temp file alone.");
+    assert.match(results.at(-2)!, /Not approved; that was not done\. Instead of yes or no the owner said: "idk, make your own decision"/);
+    assert.ok(existsSync(join(home, "Downloads", "old.tmp")), "nothing was deleted");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("phone calls from a person's own computer: no webhook; Momo asks the provider how the call went", { timeout: 60_000 }, async () => {
   const started: Array<{ to: string; goal: string; webhookUrl?: string }> = [];
   let ended = false;

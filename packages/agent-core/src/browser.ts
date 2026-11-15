@@ -89,6 +89,17 @@ export async function copySignIns(source: BrowserSource, profileDir: string): Pr
   await rm(tmp, { recursive: true, force: true });
   const failed: string[] = [];
   await mkdir(tmp, { recursive: true });
+  // Find out in a moment, not after copying everything, whether the browser is open and holding its sign-in files.
+  for (const f of [join(profile, "Network", "Cookies"), join(profile, "Cookies"), join(profile, "Login Data")]) {
+    if (!existsSync(join(source.dir, f))) continue;
+    try {
+      await copyFile(join(source.dir, f), join(tmp, "probe"));
+    } catch {
+      await rm(tmp, { recursive: true, force: true });
+      throw new BrowserBusy(`${source.name} is open and holding its sign-in files`);
+    }
+  }
+  await rm(join(tmp, "probe"), { force: true });
   await copyFile(join(source.dir, "Local State"), join(tmp, "Local State"));
   await copyTree(join(source.dir, profile), join(tmp, profile), failed);
   if (failed.some((f) => SIGN_INS.test(f))) {
@@ -173,8 +184,15 @@ export class VisibleBrowser implements BrowserSessionFactory {
     }
   }
 
+  private preparing: Promise<string> | undefined;
+
   /** Bring the owner's sign-ins over if that hasn't happened yet. Safe to call again; it only ever copies once. */
-  async prepare(): Promise<string> {
+  prepare(): Promise<string> {
+    // One copy at a time, however many callers.
+    return (this.preparing ??= this.copyOnce().finally(() => (this.preparing = undefined)));
+  }
+
+  private async copyOnce(): Promise<string> {
     const have = this.copied();
     if (have) return (this.signIns = `carried over from your ${have.name}`);
     const source = this.o.signIns[0];

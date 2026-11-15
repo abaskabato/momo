@@ -148,9 +148,11 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       const notes: string[] = [
         `model: ${model}`,
         `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : visible ? "a visible window on this computer (Chrome or Edge; you can watch and step in)" : "headless Chromium"}`,
-        ...(browser instanceof VisibleBrowser ? [`sign-ins and saved passwords: ${await browser.prepare()}`] : []),
+        ...(browser instanceof VisibleBrowser ? ["sign-ins and saved passwords: checking in the background (the result is logged below)"] : []),
         `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
       ];
+      // Copying a big browser profile can take minutes; Momo answers texts meanwhile.
+      if (browser instanceof VisibleBrowser) void browser.prepare().then((r) => console.log(`  sign-ins and saved passwords: ${r}`), () => {});
       if (pc) notes.push("files and commands: full access to this computer (it looks freely; every change asks for your YES)");
       if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {

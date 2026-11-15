@@ -15,12 +15,13 @@
 
 import type { Page } from "playwright-core";
 import { fillLogin, type BrowserSessionFactory } from "../../browser.ts";
-import type { Approval } from "../../approvals.ts";
+import { YES_TO_ALL, type Approval } from "../../approvals.ts";
+export { YES_TO_ALL };
 import type { Skill, SkillContext } from "../../skill.ts";
 import type { AddressSecret, PaymentSecret } from "../../vault.ts";
 import { guessCode, matchesEmail, type Email } from "../../inbox.ts";
 import type { Computer, ComputerFactory } from "../../computer.ts";
-import { isReadOnlyCommand, touchesMomoSecrets, type PcAccess } from "../../pc.ts";
+import { isDestructiveCommand, isReadOnlyCommand, touchesMomoSecrets, type PcAccess } from "../../pc.ts";
 import type { AdNode } from "../../desktop.ts";
 import type { Task } from "../../tasks.ts";
 import { RequestTooLarge } from "../../llm.ts";
@@ -120,6 +121,7 @@ export const COMPUTER_TOOLS: ToolSpec[] = [
 
 export const WEB_SYSTEM = `You are Momo, finishing a real errand for the owner in a web browser. Getting it done is the job.
 Start acting at once: your first move is a tool call, never a question. If you know the site, goto it; if not, search (goto https://html.duckduckgo.com/html/?q=your+search+words) and pick a result. Fill gaps with sensible defaults from what you know about the owner (their city, today's date, their preferences) and say what you assumed when you finish; ask the owner only when you are truly blocked or a wrong guess would cost money.
+On the owner's own computer your browser tools drive a real Chrome or Edge window that carries their sign-ins. If they say "use my regular browser", that is this window: use goto, never start another browser with a command. If a site isn't signed in there, call sign_in rather than hunting through browser profiles.
 Work step by step: goto, read_page, then act on element numbers (select_option for dropdowns, press_key Enter to search). Use screenshot when the layout matters (calendars, seat maps, unclear pages). Be decisive; prefer the obvious choice that matches the request and the owner's known preferences. Ask the owner only when a wrong guess would matter.
 Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms and total, then do it.
 Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. When a site needs the owner to sign in, call sign_in without hesitating: if no login is saved, the owner is asked for their email and password and you carry on once they send it. Don't give up or work around a sign-in, and don't type passwords or card numbers yourself.
@@ -147,6 +149,8 @@ Sending, buying, deleting, or anything that can't be undone needs request_approv
 
 interface State {
   history: Turn[];
+  /** The owner said "yes to all": commands in this errand run without asking, except ones that destroy things. */
+  trustPc?: boolean;
   /** How hard the history is being cut to fit a small AI allowance (0 = not at all). */
   tight?: number;
   url?: string;
@@ -250,7 +254,24 @@ export class WebTaskSkill implements Skill {
   async onInput(task: Task, text: string, ctx: SkillContext): Promise<void> {
     const s = task.data as unknown as State;
     const w = s.waitingFor;
-    if (!w || w.kind === "approval") return;
+    if (!w) return;
+    if (w.kind === "approval") {
+      // Something other than yes or no. "Yes to all" lifts the asking for this errand's commands; anything else
+      // is the owner steering ("use the other profile", "I don't know, you decide"), not a reason to ask again.
+      await ctx.approvals.cancelForTask(task.id);
+      s.commitAllowed = false;
+      const wasCommand = !!s.approvedArgs?.change;
+      s.approvedArgs = undefined;
+      if (wasCommand && YES_TO_ALL.test(text.trim())) {
+        s.trustPc = true;
+        await ctx.reply(task, "OK. For the rest of this errand I'll run commands without asking. I'll still ask before deleting or uninstalling anything, and before I buy, book or send.");
+        this.resume(s, "Owner approved, and said yes to all: for the rest of this errand, commands run without asking (deleting or uninstalling still asks). Make the same call again now and keep going without asking about commands.");
+      } else {
+        this.resume(s, `Not approved; that was not done. Instead of yes or no the owner said: "${text}". Do what they said. If they left the choice to you, pick the most sensible way that needs no approval and carry on; don't ask for the same thing again.`);
+      }
+      await this.run(task, ctx);
+      return;
+    }
     let result: string;
     switch (w.kind) {
       case "login": {
@@ -733,6 +754,7 @@ export class WebTaskSkill implements Skill {
     const secret = { result: "Refused: that is Momo's own settings and keys, which stay private.", error: true };
     /** Ask the owner for exactly this change, or (if they already said YES to exactly this) let it through. */
     const approved = async (what: string, change: string): Promise<Outcome | undefined> => {
+      if (s.trustPc && change.startsWith("run:") && !isDestructiveCommand(change)) return undefined;
       if (s.commitAllowed && s.approvedArgs?.change === change) {
         await ctx.approvals.consume(task.id, ACTION, s.approvedArgs, 0);
         s.commitAllowed = false;

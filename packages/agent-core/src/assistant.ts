@@ -8,7 +8,7 @@
 // agent) can take it.
 
 import type { Channel, InboundMessage, SecureFormSubmission } from "@momo/protocol";
-import { ApprovalGate, type Approval, type ApprovalRequest } from "./approvals.ts";
+import { ApprovalGate, YES_TO_ALL, type Approval, type ApprovalRequest } from "./approvals.ts";
 import type { Outbound } from "./channels.ts";
 import { guessCode, type Email, type Inbox } from "./inbox.ts";
 import type { Owners } from "./owners.ts";
@@ -118,7 +118,9 @@ export class Assistant {
   /** The recent conversation as text, oldest first. */
   async recentConversation(max = 12): Promise<string> {
     const all = this.d.chat ? await this.d.chat.read() : [];
-    return all.slice(-max).map((l) => `${l.who === "owner" ? "Owner" : "Momo"}: ${l.text}`).join("\n");
+    // Raw error text from a provider is noise to the model, and has read to its safety filter as an attack.
+    const plain = (t: string) => t.replace(/^I couldn't finish that: [\s\S]*$/, "I couldn't finish that (a technical error on my side).");
+    return all.slice(-max).map((l) => `${l.who === "owner" ? "Owner" : "Momo"}: ${plain(l.text)}`).join("\n");
   }
 
   constructor(deps: AssistantDeps) {
@@ -292,6 +294,24 @@ export class Assistant {
         );
       }
       return { handled: true, taskId: t?.id };
+    }
+
+    // An errand is waiting on a yes or no and the owner said something else: that's for the errand
+    // ("yes to all", "use the other profile", "you decide"), not a new errand on top of it.
+    const asked = (await this.d.tasks.active(msg.threadId)).filter((t) => t.status === "awaiting_approval");
+    const asking1 = asked.at(-1);
+    const askSkill = asking1 && this.skill(asking1.skill);
+    // (A message that reads as a request of its own still starts its own errand.)
+    const itsOwnErrand = !YES_TO_ALL.test(text) && (/https?:\/\//i.test(text) || this.d.skills.some((s) => s.matches(text)));
+    if (asking1 && asking1.skill === "web" && askSkill?.onInput && !itsOwnErrand) {
+      // Older errands still waiting on an answer nobody gave are closed, so their questions don't pile up.
+      for (const old of asked.slice(0, -1)) {
+        old.status = "cancelled";
+        await this.d.approvals.cancelForTask(old.id);
+        await this.d.tasks.save(old, "superseded");
+      }
+      await this.guard(asking1, () => askSkill.onInput!(asking1, text, this.ctx));
+      return { handled: true, taskId: asking1.id };
     }
 
     const waiting = await this.d.tasks.awaitingInput(msg.threadId);
