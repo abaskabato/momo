@@ -198,3 +198,8 @@ footer.legal a { color: var(--mut); text-decoration: underline; text-underline-o
   main { padding-top: 48px; }
   h1, p.lede, .prose p, section.step h2, button { font-size: 22px; }
 }
+
+/* Things most people never need to touch. */
+details.options { margin-top: 1.25rem; }
+details.options summary { cursor: pointer; color: var(--mut); font-size: 0.95rem; }
+details.options[open] summary { margin-bottom: 0.75rem; }
