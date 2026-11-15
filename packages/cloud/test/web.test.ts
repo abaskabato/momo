@@ -229,7 +229,13 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-pro-latest" }] }) }));
     await page.route("https://api.telegram.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, result: { username: "ana_momo_bot" } }) }));
     await page.goto(base);
-    await page.getByRole("heading", { name: /Pick the AI/ }).waitFor();
+    await page.getByRole("heading", { name: /Text Momo/ }).waitFor();
+    // The page is one sentence and one button; the key and bot live under Settings.
+    assert.ok(await page.isHidden("#key"), "settings are folded away");
+    // Downloading with nothing filled in opens Settings at what's missing.
+    await page.click("#download");
+    await page.waitForSelector("#key", { state: "visible" });
+    assert.ok((await page.textContent("#get-status"))!.length > 0, "and says what is missing");
     await page.fill("#key", "AIza-test-key");
     // A model name the key doesn't have is caught here, not after installing.
     assert.ok(await page.isHidden("#model"), "the model box is tucked away until someone wants it");
@@ -245,7 +251,6 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.fill("#bot", "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     await page.click("#check-bot");
     await page.getByText("Found your bot: @ana_momo_bot").waitFor();
-    await page.click("#s-get summary");
     await page.click("[data-os=mac]");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
     assert.equal(download.suggestedFilename(), "Install Momo.zip");
@@ -303,9 +308,8 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     await page.getByText("Getting it takes two minutes").waitFor();
     assert.ok(await page.isHidden("#s-model"), "no AI step");
     assert.ok(await page.isHidden("#s-bot"), "no bot step");
-    assert.deepEqual(await page.$$eval("section.step:not([hidden]) h2 .num", (els) => els.map((e) => e.textContent)), ["1"], "one step: download");
-    assert.ok(await page.isHidden("#where"), "choices are folded away under Options");
-    await page.click("#s-get summary");
+    assert.ok(await page.isHidden("#where"), "choices are folded away under Settings");
+    await page.click("#settings > summary");
     await page.click("[data-os=windows]");
     assert.equal(await page.textContent("#download"), "Download Momo for Windows");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);

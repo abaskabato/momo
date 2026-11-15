@@ -29,8 +29,6 @@ const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.
   $("s-bot").hidden = !!config.bot;
   $("intro-ready").hidden = !(config.model && config.bot);
   $("intro-manual").hidden = !!(config.model && config.bot);
-  let n = 0;
-  for (const h of document.querySelectorAll("section.step:not([hidden]) h2 .num")) h.textContent = String(++n);
 });
 
 // --- Step: the AI ---------------------------------------------------------
@@ -123,7 +121,7 @@ $("where").addEventListener("change", () => {
   $("where-note").textContent = {
     web: "Momo uses websites in a browser window of its own. It starts with a copy of your Chrome or Edge sign-ins and saved passwords, so it's already logged in where you are; your own browser isn't touched.",
     local: "Momo can also use apps on this computer, like a person at the screen. It asks before sending or deleting anything. Only you can text it.",
-    full: "Momo can use apps, read your files and run commands on this computer. It looks freely, and shows you every change (the exact command) and waits for your YES. Nothing it reads leaves the computer except to the AI you chose. Only you can text it.",
+    full: "Momo can use apps, read your files and run commands on this computer, so it can finish errands without asking you at each step. It still asks before deleting, uninstalling or replacing a file, and before it buys, books or sends. Only you can text it.",
   }[$("where").value];
 });
 
@@ -240,6 +238,11 @@ $("download").addEventListener("click", async () => {
     }
   } catch (e) {
     say(st, e.message, "bad");
+    // What's missing is filled in under Settings: open it, at the part that needs attention.
+    if (!config.model || !config.bot) {
+      $("settings").open = true;
+      (/bot/i.test(e.message) ? $("bot") : /model/i.test(e.message) ? $("model") : $("key")).scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   } finally {
     $("download").disabled = false;
   }
