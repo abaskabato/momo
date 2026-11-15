@@ -73,6 +73,55 @@ export interface ChatLine {
 }
 const CHAT_KEEP = 24;
 
+/** Something of the owner's that Momo can work with: a website it signs in to, or an app on the computer. */
+export interface Connection {
+  name: string;
+  url?: string;
+  app?: string;
+  /** Said to the owner when they pick it. */
+  note?: string;
+}
+
+const CONNECTIONS: Array<Connection & { match: RegExp }> = [
+  { name: "Gmail", match: /\bg-?mail\b|\bgoogle mail\b|\be-?mail\b/i, url: "https://mail.google.com" },
+  { name: "Google Calendar", match: /\b(google\s+)?calendar\b|\bgcal\b/i, url: "https://calendar.google.com" },
+  { name: "Google Drive", match: /\b(google\s+)?(drive|docs|sheets)\b/i, url: "https://drive.google.com" },
+  { name: "WhatsApp", match: /\bwhats?\s?(app|up)\b/i, url: "https://web.whatsapp.com", note: "I'll open WhatsApp in my browser window on your computer; scan its QR code with your phone (WhatsApp > Linked devices)." },
+  { name: "iMessage", match: /\bi-?messages?\b|\bimsg\b/i, app: "Messages", note: "this only works when I run on a Mac with access to its apps." },
+  { name: "Notion", match: /\bnotion\b/i, url: "https://www.notion.so" },
+  { name: "Granola", match: /\bgran+ol+a\b|\bgronol+a\b/i, app: "Granola" },
+  { name: "Slack", match: /\bslack\b/i, url: "https://app.slack.com" },
+  { name: "Outlook", match: /\boutlook\b|\bhotmail\b/i, url: "https://outlook.live.com/mail" },
+  { name: "LinkedIn", match: /\blinked\s?in\b/i, url: "https://www.linkedin.com" },
+  { name: "Amazon", match: /\bamazon\b/i, url: "https://www.amazon.com" },
+];
+
+const list = (names: string[]) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`);
+
+/**
+ * The services named in a reply. "all" means every one Momo listed. With `strict`
+ * (an unprompted reply to the welcome question) only known names count, so an
+ * errand texted instead isn't mistaken for a list; after "connect ...", anything
+ * else named is kept too, to be found as a website or an app.
+ */
+export function pickConnections(text: string, strict = false): Connection[] {
+  const strip = ({ match: _m, ...c }: Connection & { match: RegExp }): Connection => c;
+  if (/^\s*(all|everything|all of (them|it|those)|yes,? all)\b[\s.!]*$/i.test(text)) return CONNECTIONS.map(strip);
+  const known = CONNECTIONS.filter((c) => c.match.test(text));
+  let rest = text;
+  for (const c of known) rest = rest.replace(new RegExp(c.match.source, "gi"), ",");
+  const others = rest
+    .split(/,|\band\b|&|\+|\n/i)
+    .map((w) => w.replace(/\b(my|the|account|accounts|app|too|also|please|all)\b/gi, "").replace(/[.!?]+$/, "").trim())
+    .filter((w) => /^[\w .'-]{2,40}$/.test(w));
+  if (strict) {
+    // A plain list of names and nothing else, or it isn't an answer to the question.
+    if (!known.length || others.length) return [];
+    return known.map(strip);
+  }
+  return [...known.map(strip), ...others.map((name) => ({ name: name[0]!.toUpperCase() + name.slice(1) }))];
+}
+
 /** "stop", "can you stop it", "please cancel that", "never mind": halt everything in progress. */
 export const STOP = /^(?:(?:please|pls|ok|hey|momo)[\s,]+)*(?:(?:can|could|will|would) you\s+)?(?:(?:please|just)\s+)?(?:stop|cancel|abort|quit|halt|never ?mind|nvm)(?:\s+(?:it|that|this|everything|all|now|please|doing that|the task|the errand))*[\s.!?]*$/i;
 
@@ -323,6 +372,10 @@ export class Assistant {
       }
     }
 
+    // "Gmail, WhatsApp and Notion" after the welcome, or "connect my Slack" any time.
+    const connecting = await this.connect(msg, text, say);
+    if (connecting) return connecting;
+
     // "did you book it?" is a question about what happened, not a new booking.
     const asking = !!this.d.answer && ASKING.test(text) && text.length < 80;
     // Sent while Momo was busy with an errand ("I see you opened the browser", "make it Tuesday"): usually a
@@ -462,8 +515,11 @@ export class Assistant {
     if (step === "city") {
       await this.d.memory.set("owner.city", text.replace(/^(i'?m in|in)\s+/i, "").replace(/[.!]+$/, "").trim());
       await this.d.owners.setOnboarding("done");
+      await this.d.memory.set("connect.ask", "1");
       await say(
-        "All set. Text me things like:\n" +
+        "All set. One more thing, and you can skip it: what should I connect to, so I can work with your own stuff?\n" +
+          `${CONNECTIONS.map((c) => c.name).join(", ")}, or anything else you use.\n` +
+          "Reply with the ones you want (or \"all\"), or just text me an errand, like:\n" +
           "• book a table for 2 at Nopa Friday 7pm\n" +
           "• remind me to call mom tomorrow at 6pm\n" +
           "STOP cancels anything I'm doing. UNDO reverses the last thing I did. HELP shows this again.",
@@ -471,6 +527,34 @@ export class Assistant {
       return true;
     }
     return false;
+  }
+
+  /** The owner names services to connect: remember them, then go and check each one is signed in. */
+  private async connect(msg: InboundMessage, text: string, say: (t: string) => Promise<void>): Promise<HandleResult | undefined> {
+    const justAsked = (await this.d.memory.get("connect.ask")) === "1";
+    if (justAsked) await this.d.memory.set("connect.ask", "");
+    const asked = /^(?:please\s+)?connect(?:\s+(?:to|me to|my|with))?\s+(.+)$/i.exec(text)?.[1];
+    if (!asked && !justAsked) return undefined;
+    if (!asked && /^(skip|no|none|nope|later|not now|nothing)\b[\s.!]*$/i.test(text)) {
+      await say("No problem. Say \"connect Gmail\" (or anything else) whenever you want.");
+      return { handled: true };
+    }
+    const picked = pickConnections(asked ?? text, !asked);
+    if (!picked.length) return undefined; // not an answer to the question: carry on as a normal message
+    const before = JSON.parse((await this.d.memory.get("owner.connections")) || "[]") as Connection[];
+    const all = [...before.filter((b) => !picked.some((p) => p.name === b.name)), ...picked];
+    await this.d.memory.set("owner.connections", JSON.stringify(all));
+    const web = this.skill("web");
+    const notes = picked.filter((c) => c.note).map((c) => `${c.name}: ${c.note}`);
+    await say(`Connecting ${list(picked.map((c) => c.name))}. I'll open each one and tell you which are ready.${notes.length ? `\n${notes.join("\n")}` : ""}`);
+    if (!web) return { handled: true };
+    const request =
+      `Connect the owner's accounts. For each service below, open it and see whether it is signed in. If it isn't, try the owner's other browser accounts (use_account), then sign_in. ` +
+      `Don't read, send or change anything in them. Finish with one short line per service: ready, or exactly what the owner needs to do.\n` +
+      picked.map((c) => `- ${c.name}${c.url ? `: ${c.url}` : c.app ? `: the ${c.app} app on this computer (computer_open)` : ": find its website or app"}`).join("\n");
+    const task = await this.d.tasks.create({ skill: web.name, channel: msg.channel, threadId: msg.threadId, from: msg.from, request });
+    await this.guard(task, () => web.start(task, this.ctx));
+    return { handled: true, taskId: task.id };
   }
 
   private skill(name: string): Skill | undefined {

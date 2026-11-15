@@ -12,8 +12,18 @@ import type { AgentDesktop } from "./desktop.ts";
 import type { LocalVault } from "./vault.ts";
 import type { LoginSecret } from "./vault.ts";
 
+/** One of the owner's browser profiles: a separate set of sign-ins (work, personal, ...). */
+export interface BrowserAccount {
+  id: string; // the profile's folder name
+  name: string; // what the owner called it
+  email: string; // the Google account it's signed in to, if any
+}
+
 export interface BrowserSessionFactory {
-  open(): Promise<{ page: Page; close: () => Promise<void> }>;
+  /** `account`: which of the owner's browser profiles to open in (see accounts()); the usual one when left out. */
+  open(account?: string): Promise<{ page: Page; close: () => Promise<void> }>;
+  /** The owner's browser profiles, the one in use first. Absent or empty when there is just one browser. */
+  accounts?(): Promise<BrowserAccount[]>;
   /** Something the owner should be told about the browser, once (e.g. "close Chrome so I can copy your sign-ins"). */
   notice?(): string | undefined;
 }
@@ -101,7 +111,9 @@ export async function copySignIns(source: BrowserSource, profileDir: string): Pr
   }
   await rm(join(tmp, "probe"), { force: true });
   await copyFile(join(source.dir, "Local State"), join(tmp, "Local State"));
-  await copyTree(join(source.dir, profile), join(tmp, profile), failed);
+  // Every profile, not only the last one used: people keep work and personal accounts in separate ones.
+  const profiles = (await readdir(source.dir, { withFileTypes: true })).filter((d) => d.isDirectory() && /^(Default|Profile \d+)$/.test(d.name)).map((d) => d.name);
+  for (const p of profiles.includes(profile) ? profiles : [profile]) await copyTree(join(source.dir, p), join(tmp, p), failed);
   if (failed.some((f) => SIGN_INS.test(f))) {
     await rm(tmp, { recursive: true, force: true });
     throw new BrowserBusy(`${source.name} is open and holding its sign-in files`);
@@ -167,6 +179,8 @@ export class VisibleBrowser implements BrowserSessionFactory {
   started = "";
   /** Where the sign-ins stand, in words for the log. */
   signIns = "";
+  /** The profile folder the window is running in ("" = the usual one). */
+  private current = "";
   private waitingFor = ""; // the everyday browser that must be closed once before its sign-ins can be copied
   private tell: string | undefined;
   private tabs = 0;
@@ -218,10 +232,27 @@ export class VisibleBrowser implements BrowserSessionFactory {
     return t;
   }
 
+  /** The owner's profiles that were copied over, the one in use first. */
+  async accounts(): Promise<BrowserAccount[]> {
+    const have = this.copied();
+    if (!have) return [];
+    try {
+      const state = JSON.parse(readFileSync(join(this.o.profileDir, "Local State"), "utf8")) as { profile?: { info_cache?: Record<string, { name?: string; user_name?: string }> } };
+      const inUse = this.current || have.profile;
+      return Object.entries(state.profile?.info_cache ?? {})
+        .filter(([id]) => existsSync(join(this.o.profileDir, id)))
+        .map(([id, p]) => ({ id, name: p.name ?? id, email: p.user_name ?? "" }))
+        .sort((a, b) => Number(b.id === inUse) - Number(a.id === inUse));
+    } catch {
+      return [];
+    }
+  }
+
   private async launch(): Promise<BrowserContext> {
     const { chromium } = await import("playwright-core");
     await this.prepare();
     const have = this.copied();
+    if (have && this.current) have.profile = this.current;
     // A copied profile only opens with the browser it came from.
     const channels = have ? [have.channel, ...this.o.channels.filter((c) => c !== have.channel)] : this.o.channels;
     const base = {
@@ -244,9 +275,21 @@ export class VisibleBrowser implements BrowserSessionFactory {
     return chromium.launchPersistentContext(this.o.profileDir, { ...base, viewport: { width: 1280, height: 860 }, headless: true });
   }
 
-  async open() {
+  async open(account?: string) {
     // Still waiting for the owner to close their browser: try again whenever nothing is in progress.
     if (this.waitingFor && this.tabs === 0 && this.context) await this.dispose();
+    if (account) {
+      // Another of the owner's profiles: one browser runs one profile, so the window is reopened in that one.
+      const all = await this.accounts();
+      const want = account.trim().toLowerCase();
+      const target = all.find((a) => a.email.toLowerCase() === want || a.id.toLowerCase() === want || a.name.toLowerCase() === want) ?? all.find((a) => a.email.toLowerCase().includes(want) || a.name.toLowerCase().includes(want));
+      if (!target) throw new Error(`no browser account "${account}" here. There ${all.length === 1 ? "is" : "are"}: ${all.map((a) => `${a.name}${a.email ? ` (${a.email})` : ""}`).join(", ") || "none copied yet"}`);
+      if (target.id !== (this.current || this.copied()?.profile)) {
+        if (this.tabs > 0) throw new Error("another errand is using the browser; switch accounts when it has finished");
+        await this.dispose();
+        this.current = target.id;
+      }
+    }
     let context = await (this.context ??= this.launch());
     let page: Page;
     try {

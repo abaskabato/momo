@@ -481,6 +481,18 @@ test("visible browser starts out with the owner's everyday sign-ins: copied once
     const to = join(root, "momo", "other");
     assert.equal((await copySignIns({ channel: "msedge", name: "Edge", dir: work }, to)).profile, "Profile 2");
     assert.equal(readFileSync(join(to, "Profile 2", "Network", "Cookies"), "utf8"), "work");
+    // Both profiles came over, and the browser knows them by name and email, the one in use first.
+    assert.ok(existsSync(join(to, "Default")));
+    writeFileSync(join(to, "Local State"), JSON.stringify({ profile: { last_used: "Profile 2", info_cache: { Default: { name: "Abas", user_name: "home@example.com" }, "Profile 2": { name: "Work", user_name: "work@example.com" }, "Profile 9": { name: "Gone" } } } }));
+    const multi = new VisibleBrowser({ profileDir: to, headless: true });
+    assert.deepEqual(await multi.accounts(), [{ id: "Profile 2", name: "Work", email: "work@example.com" }, { id: "Default", name: "Abas", email: "home@example.com" }]);
+    const tab = await multi.open();
+    await assert.rejects(multi.open("home@example.com"), /another errand is using the browser/);
+    await tab.close();
+    await (await multi.open("home@example.com")).close();
+    assert.equal((await multi.accounts())[0]!.name, "Abas", "switched");
+    await assert.rejects(multi.open("nobody@example.com"), /no browser account "nobody@example.com" here\. There are: Abas \(home@example.com\), Work \(work@example.com\)/);
+    await multi.dispose();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -580,6 +592,49 @@ test("Momo asks for a password plainly; texting it back signs in, and it is neve
   await tg(app, rt, "what did I just send you?");
   assert.ok(asked.length > 0 && !asked.some((c) => c.includes(PASSWORD)), "the password is not in the conversation memory");
   assert.match(asked.at(-1)!, /\(sent their 127\.0\.0\.1:\d+ login\)/);
+});
+
+test("onboarding asks what to connect; the owner names anything, Momo goes and checks each, and later errands know about them", { timeout: 60_000 }, async () => {
+  const { pickConnections } = await import("@momo/agent-core");
+  assert.deepEqual(pickConnections("gronolla gmail whatsup imessage all", true).map((c) => c.name), ["Gmail", "WhatsApp", "iMessage", "Granola"]);
+  assert.equal(pickConnections("all", true).length > 8, true);
+  assert.deepEqual(pickConnections("book a table for 2 at Nopa Friday 7pm", true), [], "an errand is not a list of services");
+  assert.deepEqual(pickConnections("check my email", true), []);
+  assert.deepEqual(pickConnections("my Todoist and Gmail").map((c) => c.name), ["Gmail", "Todoist"], "anything can be connected by name");
+
+  const firstTurns: string[] = [];
+  const planner: Planner = {
+    async next(_system, history) {
+      if (history.length === 1) firstTurns.push(JSON.stringify(history[0]));
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Gmail: ready. WhatsApp: scan the QR code in my browser window." } } as Block];
+    },
+  };
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON);
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  assert.match(await tg(app, rt, "San Francisco"), /^All set\. One more thing, and you can skip it: what should I connect to.*Gmail, Google Calendar, Google Drive, WhatsApp, iMessage, Notion, Granola/s);
+
+  // Named loosely, typos and all.
+  assert.equal(await tg(app, rt, "gmail and whatsup"), "Gmail: ready. WhatsApp: scan the QR code in my browser window.");
+  assert.ok(sent.some((m) => /^Connecting Gmail and WhatsApp\. I'll open each one and tell you which are ready\.\nWhatsApp: I'll open WhatsApp in my browser window/.test(m.text)));
+  assert.match(firstTurns.at(-1)!, /Connect the owner's accounts\..*- Gmail: https:\/\/mail\.google\.com.*- WhatsApp: https:\/\/web\.whatsapp\.com/s);
+
+  // Any time later, and anything at all.
+  await tg(app, rt, "connect my Todoist");
+  assert.match(firstTurns.at(-1)!, /- Todoist: find its website or app/);
+
+  // Errands afterwards are told what is connected.
+  await tg(app, rt, "book a table at Nopa for my usual group");
+  assert.match(firstTurns.at(-1)!, /The owner's connected services: Gmail \(https:\/\/mail\.google\.com\), WhatsApp \(https:\/\/web\.whatsapp\.com\), Todoist\./);
+});
+
+test("skipping the connections question, or texting an errand instead, just works", { timeout: 60_000 }, async () => {
+  const planner: Planner = { async next() { return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Booked." } } as Block]; } };
+  const a = runtime(planner, () => FRIDAY_NOON);
+  await tg(a.app, a.rt, "hey");
+  await tg(a.app, a.rt, "Ana");
+  await tg(a.app, a.rt, "San Francisco");
+  assert.match(await tg(a.app, a.rt, "skip"), /^No problem\. Say "connect Gmail"/);
 });
 
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {

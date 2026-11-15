@@ -118,7 +118,9 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   // MOMO_ACCESS=full: files and commands on this computer too (the owner's own; one owner).
   // Looking is free; every change is shown to the owner and waits for their YES.
   const pc = env.MOMO_ACCESS === "full" ? new LocalPc() : undefined;
-  const web = new WebTaskSkill(planner, browser, computers, pc);
+  // On the owner's own computer commands run without a question each (deleting, uninstalling and replacing
+  // files still ask). MOMO_ASK=commands goes back to asking before every change.
+  const web = new WebTaskSkill(planner, browser, computers, pc, { freeCommands: env.MOMO_ASK !== "commands" });
   const runtime = new HostedRuntime({
     redis: kv,
     keys: new UserKeys(Buffer.from(master, "base64")),
@@ -153,7 +155,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       ];
       // Copying a big browser profile can take minutes; Momo answers texts meanwhile.
       if (browser instanceof VisibleBrowser) void browser.prepare().then((r) => console.log(`  sign-ins and saved passwords: ${r}`), () => {});
-      if (pc) notes.push("files and commands: full access to this computer (it looks freely; every change asks for your YES)");
+      if (pc) notes.push(env.MOMO_ASK === "commands" ? "files and commands: full access to this computer (it looks freely; every change asks for your YES)" : "files and commands: full access to this computer (it asks only before deleting, uninstalling or replacing a file; MOMO_ASK=commands makes it ask before every change)");
       if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {
         const me = await telegram.me();

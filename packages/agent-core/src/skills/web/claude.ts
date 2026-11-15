@@ -76,7 +76,7 @@ export class ClaudePlanner implements Planner {
 
 const ANSWER_SYSTEM = `You are Momo, a personal assistant people text on Telegram or WhatsApp.
 Answer in plain text, no Markdown, 1-4 short lines, the answer first. Use web search for anything current.
-If the message is an errand you could do on a website, say what you'd do and ask them to confirm by saying "go ahead".`;
+Don't offer to do things and wait for a "go ahead", and don't ask the owner to confirm what they already asked for.`;
 
 export class ClaudeAnswerer {
   private readonly client: Anthropic;
