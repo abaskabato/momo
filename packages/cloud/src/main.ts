@@ -239,6 +239,9 @@ if (import.meta.main) {
     };
   }
   serve({ fetch: app.fetch, port });
+  const { readFile } = await import("node:fs/promises");
+  const fetched = await readFile(new URL("../../../VERSION", import.meta.url), "utf8").then((v) => v.trim(), () => "");
+  if (fetched) console.log(`version: downloaded ${fetched}`);
   console.log(`momo listening on :${port}${hosted ? " (hosted mode)" : ""}${redisUrl ? "" : ` (state in ${process.env.MOMO_HOME ?? "~/.momo"})`}`);
   if (hosted) for (const n of await hosted.start()) console.log(`  ${n}`);
   for (const sig of ["SIGINT", "SIGTERM"] as const) {

@@ -73,6 +73,9 @@ export interface ChatLine {
 }
 const CHAT_KEEP = 24;
 
+/** "stop", "can you stop it", "please cancel that", "never mind": halt everything in progress. */
+export const STOP = /^(?:(?:please|pls|ok|hey|momo)[\s,]+)*(?:(?:can|could|will|would) you\s+)?(?:(?:please|just)\s+)?(?:stop|cancel|abort|quit|halt|never ?mind|nvm)(?:\s+(?:it|that|this|everything|all|now|please|doing that|the task|the errand))*[\s.!?]*$/i;
+
 /**
  * A login texted in reply to "what's your email and password?": "ana@example.com MyPassword",
  * the two on separate lines, or "email is ... password is ...". Anything that reads like a
@@ -218,7 +221,7 @@ export class Assistant {
       return { handled: true };
     }
 
-    if (/^(stop|stop all|cancel all|abort)$/i.test(text)) {
+    if (STOP.test(text)) {
       const active = await this.d.tasks.active(msg.threadId);
       for (const t of active) {
         t.status = "cancelled";
@@ -486,6 +489,7 @@ export function failureText(e: Error): string {
   const m = e.message;
   if (/\b(401|403)\b|invalid.*api.?key|unauthorized/i.test(m)) return "I can't reach my AI: its key was refused. Check the key in Momo's settings, then text me again.";
   if (/\b404\b|model.*(not found|does not exist|decommissioned)|unknown model/i.test(m)) return "I can't reach my AI: the model name in Momo's settings doesn't exist. Fix the model name, then text me again.";
+  if (/the AI declined to continue/i.test(m)) return `I've stopped this errand: ${m.replace(/^.*?the AI declined/i, "my AI declined")}. Nothing was booked, bought or changed. That's its safety filter, not something you did. Ask me again in different words, or tell me a different way to go about it.`;
   if (/\b413\b|request too large|context.{0,12}length/i.test(m)) return "My AI key's allowance is too small for this errand, even after cutting pages down. Websites need room to read: upgrade the key's plan with its provider, or pick another AI in Momo's settings, then text me again.";
   if (/\b429\b|quota|rate limit/i.test(m)) return "My AI is out of quota or rate-limited right now. Try again in a bit, or switch to a paid key.";
   return `I couldn't finish that: ${m.slice(0, 400)}`;

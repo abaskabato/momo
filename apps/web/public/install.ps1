@@ -84,6 +84,8 @@ Start-Sleep -Seconds 2
 if (Test-Path $App) { Remove-Item -Recurse -Force $App }
 Move-Item (Get-ChildItem $Tmp -Directory | Select-Object -First 1).FullName $App
 Remove-Item -Recurse -Force $Tmp
+# When this copy was fetched; Momo prints it at startup so it's clear which version is running.
+Set-Content -Path (Join-Path $App "VERSION") -Value (Get-Date -Format "yyyy-MM-dd HH:mm")
 Say "Installing (a minute or two)..."
 Push-Location $App
 & $Npm ci --omit=dev --no-audit --no-fund --no-update-notifier --loglevel=error

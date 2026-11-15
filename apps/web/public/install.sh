@@ -82,6 +82,7 @@ else curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$
 mkdir -p "$TMP/app" && tar -xzf "$TMP/momo.tgz" -C "$TMP/app" --strip-components=1
 rm -rf "$DIR/app.old"; [ -d "$DIR/app" ] && mv "$DIR/app" "$DIR/app.old"
 mv "$TMP/app" "$DIR/app" && rm -rf "$TMP" "$DIR/app.old"
+date "+%Y-%m-%d %H:%M" > "$DIR/app/VERSION"   # Momo prints this at startup, so it's clear which version is running
 say "Installing (a minute or two)…"
 (cd "$DIR/app" && npm ci --omit=dev --no-audit --no-fund --no-update-notifier --loglevel=error)
 export PLAYWRIGHT_BROWSERS_PATH="$DIR/browsers"

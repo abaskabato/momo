@@ -6,6 +6,9 @@ import type { Block, Planner, ToolSpec, Turn } from "./agent.ts";
 
 const DEFAULT_MODEL = "claude-opus-5-5";
 
+/** The model's safety filter declined to go on with an errand. */
+export class PlannerRefused extends Error {}
+
 export class ClaudePlanner implements Planner {
   private readonly client: Anthropic;
   private readonly model: string;
@@ -20,13 +23,16 @@ export class ClaudePlanner implements Planner {
    * so the errand's history must not be trimmed on this side. Old page views are cleared by the API instead.
    */
   readonly keepsOwnContext = true;
+  /** Ask the API to drop thinking blocks that no longer match the conversation instead of failing the errand. */
+  private dropMismatched = true;
 
   async next(system: string, history: Turn[], tools: ToolSpec[]): Promise<Block[]> {
     const ask = () =>
       this.client.beta.messages.create({
         model: this.model,
         max_tokens: 16000,
-        betas: ["server-side-fallback-2026-07-01", "context-management-2025-06-27"],
+        betas: ["server-side-fallback-2026-07-01", "context-management-2025-06-27", ...(this.dropMismatched ? ["thinking-binding-controls-2026-08-01"] : [])],
+        ...(this.dropMismatched && { thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } } as unknown as Anthropic.Beta.BetaThinkingConfigParam }),
         fallbacks: "default",
         output_config: { effort: "high" },
         // Server-side clearing of old tool results doesn't count as editing the conversation.
@@ -38,7 +44,14 @@ export class ClaudePlanner implements Planner {
       });
     let response: Awaited<ReturnType<typeof ask>>;
     try {
-      response = await ask();
+      try {
+        response = await ask();
+      } catch (e) {
+        // A model or platform that doesn't take that setting: carry on without it.
+        if (!this.dropMismatched || !(e instanceof Anthropic.BadRequestError) || !/block_binding|thinking-binding-controls|anthropic-beta/i.test(e.message)) throw e;
+        this.dropMismatched = false;
+        response = await ask();
+      }
     } catch (e) {
       // History from before this rule was kept (an errand saved by an older Momo, or one cut down to fit a
       // small allowance): the documented recovery is to drop the thinking blocks and ask once more.
@@ -48,7 +61,15 @@ export class ClaudePlanner implements Planner {
       }
       response = await ask();
     }
-    if (response.stop_reason === "refusal") return [{ type: "text", text: "I can't help with that one." }];
+    // Say in the log when reasoning had to be dropped, and where, so the cause can be found.
+    const dropped = (response as unknown as { input_transformations?: Array<{ type: string; path?: string; reason?: string }> }).input_transformations ?? [];
+    if (dropped.length) console.warn(`claude: ${dropped.length} thinking block(s) no longer matched the conversation (first: ${dropped[0]!.path} ${dropped[0]!.reason ?? dropped[0]!.type})`);
+    // The model's safety filter stopped the errand. End it and say so; returning a sentence here would be
+    // taken as a question to the owner, and every reply would run into the same wall.
+    if (response.stop_reason === "refusal") {
+      const why = (response as unknown as { stop_details?: { category?: string | null } }).stop_details?.category;
+      throw new PlannerRefused(`the AI declined to continue${why ? ` (${why})` : ""}`);
+    }
     return response.content as Block[];
   }
 }
