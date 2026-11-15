@@ -40,6 +40,10 @@ export async function startMockSite(
       res.end(s);
     };
 
+    if (url.pathname === "/long") {
+      // A page with far more on it than a small model allowance can take in one go.
+      return html(200, page("Long menu", Array.from({ length: 150 }, (_, i) => `<p>Dish ${i + 1}: seasonal plate with a long description of how it is made.</p>`).join("")));
+    }
     if (url.pathname === "/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const hits = venues.filter((v) => v.name.toLowerCase().includes(q) || v.slug === q);

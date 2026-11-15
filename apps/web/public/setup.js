@@ -119,7 +119,7 @@ $("check-bot").addEventListener("click", async () => {
 // --- Step: what Momo can use ----------------------------------------------
 $("where").addEventListener("change", () => {
   $("where-note").textContent = {
-    web: "Momo uses websites in a browser of its own, so it doesn't touch yours.",
+    web: "Momo uses websites in a browser window of its own. It starts with a copy of your Chrome or Edge sign-ins and saved passwords, so it's already logged in where you are; your own browser isn't touched.",
     local: "Momo can also use apps on this computer, like a person at the screen. It asks before sending or deleting anything. Only you can text it.",
     full: "Momo can use apps, read your files and run commands on this computer. It looks freely, and shows you every change (the exact command) and waits for your YES. Nothing it reads leaves the computer except to the AI you chose. Only you can text it.",
   }[$("where").value];

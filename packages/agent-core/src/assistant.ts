@@ -433,6 +433,7 @@ export function failureText(e: Error): string {
   const m = e.message;
   if (/\b(401|403)\b|invalid.*api.?key|unauthorized/i.test(m)) return "I can't reach my AI: its key was refused. Check the key in Momo's settings, then text me again.";
   if (/\b404\b|model.*(not found|does not exist|decommissioned)|unknown model/i.test(m)) return "I can't reach my AI: the model name in Momo's settings doesn't exist. Fix the model name, then text me again.";
+  if (/\b413\b|request too large|context.{0,12}length/i.test(m)) return "My AI key's allowance is too small for this errand, even after cutting pages down. Websites need room to read: upgrade the key's plan with its provider, or pick another AI in Momo's settings, then text me again.";
   if (/\b429\b|quota|rate limit/i.test(m)) return "My AI is out of quota or rate-limited right now. Try again in a bit, or switch to a paid key.";
   return `I couldn't finish that: ${m.slice(0, 400)}`;
 }

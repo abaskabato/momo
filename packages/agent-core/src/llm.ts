@@ -133,6 +133,16 @@ export function fromChatChoice(message: { content?: string | null; tool_calls?: 
   return blocks;
 }
 
+/** The request was bigger than this model or key allows (small free tiers, small context windows). */
+export class RequestTooLarge extends Error {
+  /** The allowance in tokens, when the provider says. */
+  limit?: number;
+  constructor(message: string, limit?: number) {
+    super(message);
+    this.limit = limit;
+  }
+}
+
 /** Rate limits and overloads are routine (especially on free tiers): retry with backoff. */
 const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 const RETRIES = 5;
@@ -151,7 +161,15 @@ async function chat(s: ModelSpec, fetchImpl: typeof fetch, body: Record<string, 
     await res.body?.cancel();
     await sleep(after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** attempt * 2000, 30_000) * (0.75 + Math.random() / 2));
   }
-  if (!res.ok) throw new Error(`${s.provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) {
+    const text = (await res.text()).slice(0, 300);
+    const message = `${s.provider} ${res.status}: ${text}`;
+    if (res.status === 413 || (res.status === 400 && /too large|context.{0,12}length|maximum context|too many tokens|reduce (your|the) (message|prompt|length)/i.test(text))) {
+      const limit = /limit:?\s*(\d{3,})/i.exec(text)?.[1];
+      throw new RequestTooLarge(message, limit ? Number(limit) : undefined);
+    }
+    throw new Error(message);
+  }
   const json = (await res.json()) as { choices: Array<{ message: Parameters<typeof fromChatChoice>[0] }> };
   return json.choices[0]!.message;
 }

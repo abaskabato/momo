@@ -23,6 +23,7 @@ import type { Computer, ComputerFactory } from "../../computer.ts";
 import { isReadOnlyCommand, touchesMomoSecrets, type PcAccess } from "../../pc.ts";
 import type { AdNode } from "../../desktop.ts";
 import type { Task } from "../../tasks.ts";
+import { RequestTooLarge } from "../../llm.ts";
 
 export type Block =
   | { type: "text"; text: string }
@@ -144,6 +145,8 @@ Sending, buying, deleting, or anything that can't be undone needs request_approv
 
 interface State {
   history: Turn[];
+  /** How hard the history is being cut to fit a small AI allowance (0 = not at all). */
+  tight?: number;
   url?: string;
   storage?: unknown;
   waitingFor?: { kind: Pause; toolUseId: string; selector?: string };
@@ -168,6 +171,9 @@ type Pause = "answer" | "approval" | "login" | "secret" | "code" | "live" | "cal
 type Outcome = { result: string; error?: boolean; image?: string; imageType?: "image/jpeg" | "image/png" } | { pause: Pause; selector?: string } | { done: string };
 /** Full page snapshots and screenshots kept in the planner's history; older ones are trimmed. */
 const KEEP_PAGES = 2;
+/** When the model says a request was too large: [characters kept of the newest result, of each older one], tightening each time. */
+const TIGHT: Array<[number, number]> = [[0, 0], [5000, 300], [2500, 200], [1200, 120]];
+const TIGHTEST = TIGHT.length - 1;
 type Session = { page: Page; close: () => Promise<void>; refs: Map<number, string>; usedAt: number };
 
 export class WebTaskSkill implements Skill {
@@ -222,6 +228,8 @@ export class WebTaskSkill implements Skill {
     const before = recent ? `\nRecent conversation, for context only (oldest first):\n${recent}\n` : "";
     task.data = { steps: 0, emailSince: ctx.now().getTime() - 2 * 60_000, history: [{ role: "user", content: [{ type: "text", text: `${about}\nToday is ${ctx.now().toDateString()}.${before}\nErrand: ${task.request}` }] }] } satisfies State;
     await ctx.reply(task, "On it.");
+    const notice = this.browser.notice?.();
+    if (notice) await ctx.reply(task, notice);
     // A link in the request: have it open before the model's first move, so it starts from the page, not from nothing.
     const link = /https?:\/\/[^\s<>"')]+/i.exec(task.request)?.[0];
     if (link) {
@@ -349,8 +357,20 @@ export class WebTaskSkill implements Skill {
     while (s.steps < MAX_STEPS) {
       s.steps++;
       if (s.steps % PROGRESS_EVERY === 0) await ctx.reply(task, `Still on it${pageUrl() ? ` (on ${new URL(pageUrl()!).host || "the web"})` : ""}.`);
-      compact(s.history);
-      const blocks = await this.planner.next(this.system(), s.history, this.tools());
+      compact(s.history, s.tight);
+      let blocks: Block[];
+      for (;;) {
+        try {
+          blocks = await this.planner.next(this.system(), s.history, this.tools());
+          break;
+        } catch (e) {
+          // A small AI allowance: keep less of what's been seen and carry on, rather than give up.
+          if (!(e instanceof RequestTooLarge) || (s.tight ?? 0) >= TIGHTEST) throw e;
+          if (!s.tight) await ctx.reply(task, `My AI key only allows small requests${e.limit ? ` (${e.limit.toLocaleString("en-US")} tokens a minute)` : ""}, so I'll work with less of each page and this will be slow.`);
+          s.tight = (s.tight ?? 0) + 1;
+          compact(s.history, s.tight);
+        }
+      }
       s.history.push({ role: "assistant", content: blocks });
       const calls = blocks.filter((b): b is Extract<Block, { type: "tool_use" }> => b.type === "tool_use");
       if (calls.length === 0) {
@@ -837,8 +857,32 @@ export class WebTaskSkill implements Skill {
  * KEEP_PAGES page snapshots/screenshots stay in full. Trimmed in place, so
  * saved task state stays small too.
  */
-export function compact(history: Turn[]): void {
+export function compact(history: Turn[], tight = 0): void {
   let kept = 0;
+  if (tight) {
+    // Under a small allowance: the newest result is cut to fit, everything older to a line or two.
+    const [newest, older] = TIGHT[Math.min(tight, TIGHTEST)]!;
+    let first = true;
+    for (let t = history.length - 1; t >= 0; t--) {
+      const turn = history[t]!;
+      for (const b of turn.content) {
+        if (b.type === "tool_result") {
+          const r = b as Extract<Block, { type: "tool_result" }>;
+          const cap = first ? newest : older;
+          if (Array.isArray(r.content)) {
+            if (!first) r.content = "Screenshot (older page view omitted; read_page again if needed)";
+          } else if (r.content.length > cap) {
+            r.content = `${r.content.slice(0, cap)}\n(cut short to fit; scroll and read_page again for the rest)`;
+          }
+        } else if (b.type === "tool_use" && turn.role === "assistant") {
+          const u = b as Extract<Block, { type: "tool_use" }>;
+          for (const [k, v] of Object.entries(u.input)) if (typeof v === "string" && v.length > older * 2) u.input[k] = `${v.slice(0, older * 2)}...`;
+        }
+      }
+      if (turn.role === "user" && turn.content.some((b) => b.type === "tool_result")) first = false;
+    }
+    return;
+  }
   for (let t = history.length - 1; t >= 0; t--) {
     const turn = history[t]!;
     if (turn.role !== "user") continue;

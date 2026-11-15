@@ -84,13 +84,21 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 
 | Setting | What Momo can do | Who can use it |
 |---|---|---|
-| unset (default) | Anything on websites, in its own private browser | You (or many people, on a server) |
+| unset (default) | Anything on websites. On your own computer: a visible Chrome or Edge window of Momo's own, which starts with a copy of your everyday browser's sign-ins and saved passwords (`MOMO_SIGN_INS=none` to keep it separate). On a server: a private hidden browser per person | You (or many people, on a server) |
 | `local` | Any app on this computer, via [agent-desktop](https://github.com/vercel-labs/agent-desktop). The installer walks through the Mac accessibility permission | Only you |
 | `local` + `MOMO_ACCESS=full` | Everything on this computer: apps, plus reading files and running commands directly. It looks freely; every change (the exact command, or the file it would replace) is texted to you and waits for your YES. It can't read its own keys in `~/.momo` | Only you |
 | `cloud` | Any app, in a fresh Linux desktop per errand (`docker build -f Dockerfile.desktop -t momo-desktop .`) | Many people |
 
 ## Good to know
 
+- **Already signed in.** The first time it starts, Momo copies your Chrome
+  profile (Edge if there's no Chrome) into `~/.momo/browser-profile`. If that
+  browser is open, Windows holds the files: Momo texts you to close it once,
+  then copies at the next errand. It is a one-time copy; later sign-ins you do
+  in Momo's window are kept there.
+- **Small AI allowances.** If the model says a request is too large (free
+  tiers), Momo cuts pages down and carries on, slowly. A paid key is much
+  faster.
 - **Live view** (Momo shows you its browser so you can tap through a CAPTCHA)
   works everywhere: through the website when the computer has no public
   address, straight from the server when it has one.

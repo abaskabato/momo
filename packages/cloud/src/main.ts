@@ -63,7 +63,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
-  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, VisibleBrowser, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, VisibleBrowser, everydayBrowsers, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
@@ -95,7 +95,13 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     env.MOMO_BROWSER === "desktop"
       ? new DesktopBrowser(new AgentDesktop(), env.MOMO_DESKTOP_APP || "Google Chrome")
       : visible
-        ? new VisibleBrowser({ profileDir: join(env.MOMO_HOME ?? join(homedir(), ".momo"), "browser-profile"), timezoneId: env.TZ || undefined })
+        ? new VisibleBrowser({
+            profileDir: join(env.MOMO_HOME ?? join(homedir(), ".momo"), "browser-profile"),
+            timezoneId: env.TZ || undefined,
+            // Start out signed in wherever the owner is: copy their everyday browser's sign-ins once.
+            // MOMO_SIGN_INS=none keeps Momo's browser separate; =edge or =chrome picks which to copy.
+            signIns: everydayBrowsers().filter((b) => !env.MOMO_SIGN_INS || b.name.toLowerCase() === env.MOMO_SIGN_INS.toLowerCase()),
+          })
         : new HeadlessBrowser({ timezoneId: env.TZ || undefined });
   // Any model: MOMO_MODEL=provider/model (see agent-core/src/llm.ts). Answers can use a cheaper one.
   const model = env.MOMO_MODEL ?? "anthropic/claude-opus-5-5";
@@ -141,7 +147,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     async start(): Promise<string[]> {
       const notes: string[] = [
         `model: ${model}`,
-        `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : visible ? "a visible window on this computer (Chrome or Edge, Momo's own profile; you can watch and step in)" : "headless Chromium"}`,
+        `browser: ${env.MOMO_BROWSER === "desktop" ? "your Chrome via agent-desktop" : visible ? "a visible window on this computer (Chrome or Edge; you can watch and step in)" : "headless Chromium"}`,
+        ...(browser instanceof VisibleBrowser ? [`sign-ins and saved passwords: ${await browser.prepare()}`] : []),
         `computer: ${computers ? computers.describe : "off (websites only; set MOMO_DESKTOP=local or cloud)"}`,
       ];
       if (pc) notes.push("files and commands: full access to this computer (it looks freely; every change asks for your YES)");

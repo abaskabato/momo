@@ -412,6 +412,104 @@ test("visible browser: one profile kept between errands and restarts; each erran
   }
 });
 
+test("visible browser starts out with the owner's everyday sign-ins: copied once, waits if their browser is open", { timeout: 90_000 }, async () => {
+  const { VisibleBrowser, copySignIns, BrowserBusy, everydayBrowsers } = await import("@momo/agent-core");
+  const { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, chmodSync, readFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = mkdtempSync(join(tmpdir(), "momo-signins-"));
+  const theirs = join(root, "Chrome", "User Data");
+  const momos = join(root, "momo", "browser-profile");
+  try {
+    // The owner's everyday browser, signed in to a site.
+    const { chromium } = await import("playwright-core");
+    const own = await chromium.launchPersistentContext(theirs, { headless: true });
+    await own.addCookies([{ name: "session", value: "ana-is-signed-in", url: site.origin, expires: Math.floor(Date.now() / 1000) + 86_400 }]);
+    await own.close();
+    const state = existsSync(join(theirs, "Local State")) ? JSON.parse(readFileSync(join(theirs, "Local State"), "utf8")) : {};
+    writeFileSync(join(theirs, "Local State"), JSON.stringify(state));
+    mkdirSync(join(theirs, "Default", "Cache"), { recursive: true });
+    writeFileSync(join(theirs, "Default", "Cache", "big"), "x".repeat(1000));
+    const source = { channel: "chromium", name: "Chrome", dir: theirs };
+
+    // Found where each system keeps it.
+    assert.deepEqual(everydayBrowsers({ LOCALAPPDATA: root }, "win32", root).map((b) => b.name), []);
+    mkdirSync(join(root, "Google", "Chrome", "User Data"), { recursive: true });
+    writeFileSync(join(root, "Google", "Chrome", "User Data", "Local State"), "{}");
+    assert.deepEqual(everydayBrowsers({ LOCALAPPDATA: root }, "win32", root).map((b) => b.channel), ["chrome"]);
+
+    // Their browser is open and holding the cookie file (as Windows does): Momo says so once, works anyway, and tries again later.
+    const cookieFile = [join(theirs, "Default", "Network", "Cookies"), join(theirs, "Default", "Cookies")].find((p) => existsSync(p))!;
+    const locked = process.getuid?.() !== 0;
+    const b = new VisibleBrowser({ profileDir: momos, headless: true, signIns: [source] });
+    if (locked) {
+      chmodSync(cookieFile, 0o000);
+      await assert.rejects(copySignIns(source, momos), BrowserBusy);
+      assert.match(await b.prepare(), /not carried over yet: Chrome is open/);
+      assert.match(b.notice()!, /close all your Chrome windows once/);
+      assert.equal(b.notice(), undefined, "said once");
+      const tab = await b.open();
+      assert.deepEqual(await tab.page.context().cookies(site.origin), []);
+      await tab.close();
+      chmodSync(cookieFile, 0o600);
+    }
+
+    // Closed now: the next errand has the sign-in, and the owner is told.
+    const { page, close } = await b.open();
+    assert.match(b.signIns, /carried over from your Chrome/);
+    if (locked) assert.match(b.notice()!, /copied your Chrome sign-ins/);
+    assert.equal((await page.context().cookies(site.origin)).find((c) => c.name === "session")?.value, "ana-is-signed-in");
+    assert.ok(!existsSync(join(momos, "Default", "Cache", "big")), "caches are left behind");
+    await close();
+    await b.dispose();
+
+    // Copied once only: what Momo signs in to afterwards is kept, even if the owner's browser changes.
+    rmSync(join(theirs, "Default"), { recursive: true, force: true });
+    const again = new VisibleBrowser({ profileDir: momos, headless: true, signIns: [source] });
+    assert.match(await again.prepare(), /carried over from your Chrome/);
+    const second = await again.open();
+    assert.equal((await second.page.context().cookies(site.origin)).find((c) => c.name === "session")?.value, "ana-is-signed-in");
+    await again.dispose();
+
+    // Someone who uses a second profile: the one they used last is the one copied.
+    const work = join(root, "Edge", "User Data");
+    mkdirSync(join(work, "Profile 2", "Network"), { recursive: true });
+    mkdirSync(join(work, "Default"), { recursive: true });
+    writeFileSync(join(work, "Profile 2", "Network", "Cookies"), "work");
+    writeFileSync(join(work, "Local State"), JSON.stringify({ profile: { last_used: "Profile 2" } }));
+    const to = join(root, "momo", "other");
+    assert.equal((await copySignIns({ channel: "msedge", name: "Edge", dir: work }, to)).profile, "Profile 2");
+    assert.equal(readFileSync(join(to, "Profile 2", "Network", "Cookies"), "utf8"), "work");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a small AI allowance: the errand cuts pages down and carries on instead of failing", { timeout: 60_000 }, async () => {
+  const { RequestTooLarge } = await import("@momo/agent-core");
+  const sizes: number[] = [];
+  const planner: Planner = {
+    async next(_system, history) {
+      // Only as much as fits: any single result over 1,300 characters is refused.
+      const size = Math.max(0, ...history.flatMap((t) => t.content).map((b) => (b.type === "tool_result" && typeof b.content === "string" ? b.content.length : 0)));
+      sizes.push(size);
+      if (size > 1300) throw new RequestTooLarge("groq 413: Request too large ... Limit 8000, Requested 8003", 8000);
+      const results = history.flatMap((t) => t.content).filter((b) => b.type === "tool_result").length;
+      if (results === 0) return [{ type: "tool_use", id: "g1", name: "goto", input: { url: `${site.origin}/long` } } as Block];
+      if (results === 1) return [{ type: "tool_use", id: "r1", name: "read_page", input: {} } as Block];
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Read it." } } as Block];
+    },
+  };
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON);
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  assert.equal(await tg(app, rt, "book me a table at Nopa"), "Read it.");
+  assert.ok(sent.some((m) => /only allows small requests \(8,000 tokens a minute\)/.test(m.text)), "the owner is told why it is slow, once");
+  assert.equal(sent.filter((m) => /only allows small requests/.test(m.text)).length, 1);
+  assert.ok(sizes.some((n) => n > 1300) && sizes.at(-1)! <= 1300, `sizes: ${sizes}`);
+});
+
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {
   const { rt, app } = runtime(scriptedBooking(site.origin), () => now);
   await tg(app, rt, "hi");
