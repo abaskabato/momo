@@ -120,7 +120,7 @@ export const WEB_SYSTEM = `You are Momo, finishing a real errand for the owner i
 Start acting at once: your first move is a tool call, never a question. If you know the site, goto it; if not, search (goto https://html.duckduckgo.com/html/?q=your+search+words) and pick a result. Fill gaps with sensible defaults from what you know about the owner (their city, today's date, their preferences) and say what you assumed when you finish; ask the owner only when you are truly blocked or a wrong guess would cost money.
 Work step by step: goto, read_page, then act on element numbers (select_option for dropdowns, press_key Enter to search). Use screenshot when the layout matters (calendars, seat maps, unclear pages). Be decisive; prefer the obvious choice that matches the request and the owner's known preferences. Ask the owner only when a wrong guess would matter.
 Before any final commit (booking, purchase, sending, submitting, a phone call), call request_approval with the exact terms and total, then do it.
-Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. Never ask the owner for passwords or card numbers in chat.
+Logins: sign_in. Codes or links sent by email: check_email (the owner's Momo inbox), then type the code or goto the link. Codes texted to the owner's phone: enter_code. Payment: fill_card (after approval). Shipping: fill_address. When a site needs the owner to sign in, call sign_in without hesitating: if no login is saved, the owner is asked for their email and password and you carry on once they send it. Don't give up or work around a sign-in, and don't type passwords or card numbers yourself.
 CAPTCHA or "verify you're human": hand_to_owner, then continue.
 If a site fails (blocked, sold out, broken, no availability), don't give up: find another site that can do it (search with https://html.duckduckgo.com/html/?q=...), or call_phone the business. Tell the owner what you changed.
 When the owner states a lasting preference, remember it. For anything booked at a time, add_to_calendar.
@@ -251,9 +251,14 @@ export class WebTaskSkill implements Skill {
     if (!w || w.kind === "approval") return;
     let result: string;
     switch (w.kind) {
-      case "login":
-        result = "The owner saved their login. Call sign_in again.";
+      case "login": {
+        const at = this.pages.get(task.id)?.page.url() ?? s.url;
+        const saved = at ? await ctx.vault.findLogin(new URL(at).origin).catch(() => undefined) : undefined;
+        result = saved || /^(done|ok|saved|added)\b/i.test(text.trim())
+          ? "The owner saved their login. Call sign_in again."
+          : `The owner hasn't given a login for this site. They said: ${text}`;
         break;
+      }
       case "secret":
         result = "The owner saved it. Call fill_card / fill_address again.";
         break;

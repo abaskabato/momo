@@ -73,6 +73,24 @@ export interface ChatLine {
 }
 const CHAT_KEEP = 24;
 
+/**
+ * A login texted in reply to "what's your email and password?": "ana@example.com MyPassword",
+ * the two on separate lines, or "email is ... password is ...". Anything that reads like a
+ * sentence instead is left alone.
+ */
+export function parseLogin(text: string): { identifier: string; password: string } | undefined {
+  const t = text.trim();
+  if (t.length > 300) return undefined;
+  const labelled = /(?:e-?mail|user(?:name)?|login|id)\s*(?:is\s+|[:=]\s*)?(\S+?)[\s,;]+(?:and\s+)?(?:the\s+)?(?:password|pass|pw)\s*(?:is\s+|[:=]\s*)?(\S.*)$/is.exec(t);
+  if (labelled && !labelled[2]!.includes("\n")) return { identifier: labelled[1]!, password: labelled[2]!.trim() };
+  const m = /^(\S+)\s*[\s,;|]\s*(\S+)$/.exec(t);
+  if (!m) return undefined;
+  const [, id, pw] = m as unknown as [string, string, string];
+  const looksLikeId = /^[^\s@]+@[^\s@]+\.\w{2,}$/.test(id) || /^\+?\d[\d-]{6,}$/.test(id) || /^\S+\s*\n\s*\S+$/.test(t);
+  if (!looksLikeId || pw.length < 4) return undefined;
+  return { identifier: id, password: pw };
+}
+
 /** Added to the answerer's instructions so anything that needs doing becomes an errand, whatever its wording. */
 const DO_HINT =
   "You can also act: you have a web browser, the owner's computer and apps, and can phone businesses. " +
@@ -117,14 +135,18 @@ export class Assistant {
       now,
       reply: (task, text) => deps.outbound.send(task.channel, task.threadId, text),
       requestLogin: async (task, origin, label) => {
-        if (!deps.secureLinks) {
-          return `I need your ${label} login. Save it on your computer (it never leaves it):\nmomo vault add-login ${origin}\nThen text me "done".`;
-        }
-        const link = await deps.secureLinks.create({ kind: "login", label });
+        // Just ask. The owner can text it like they'd tell a person; the private link is there for those who'd rather not.
+        const ask =
+          `To do this I need to sign in to ${label}. Text me your email (or username) and password for it, like this:\n` +
+          `ana@example.com MyPassword\n` +
+          `I keep it encrypted, use it only on ${label}, and never repeat it.`;
+        const link = deps.secureLinks ? await deps.secureLinks.create({ kind: "login", label }) : undefined;
         await deps.pendingForms.update((all) =>
-          all.concat({ id: link.id, kind: "login", origin, label, taskId: task.id, createdAt: now().getTime() }),
+          all.concat({ id: link?.id ?? `chat-${task.id}`, kind: "login", origin, label, taskId: task.id, createdAt: now().getTime() }),
         );
-        return `To do this I need your ${label} login. Add it here. It's encrypted on your phone before it's sent, and I never see it in chat:\n${link.url}`;
+        return link
+          ? `${ask}\n\nRather not type it in chat? Add it here instead. It's encrypted on your phone before it's sent:\n${link.url}`
+          : `${ask}\n\nRather not type it in chat? Save it on your computer with: momo vault add-login ${origin}\nThen text me "done".`;
       },
       requestSecret: async (task, kind) => {
         const what = kind === "card" ? "card" : "delivery address";
@@ -175,6 +197,10 @@ export class Assistant {
       // Everyone else: not ours to answer; the host decides.
       return { handled: claim !== "none" };
     }
+
+    // The login Momo asked for, texted back: saved, never kept in the conversation.
+    const login = await this.loginFromChat(msg, text);
+    if (login) return login;
 
     await this.note("owner", text);
 
@@ -305,6 +331,21 @@ export class Assistant {
     const task = await this.d.tasks.create({ skill: skill.name, channel: msg.channel, threadId: msg.threadId, from: msg.from, request: text });
     await this.guard(task, () => skill.start(task, this.ctx));
     return { handled: true, taskId: task.id };
+  }
+
+  private async loginFromChat(msg: InboundMessage, text: string): Promise<HandleResult | undefined> {
+    const creds = parseLogin(text);
+    if (!creds) return undefined;
+    const waiting = await this.d.tasks.awaitingInput(msg.threadId);
+    const form = waiting && (await this.d.pendingForms.read()).findLast((f) => f.kind === "login" && f.taskId === waiting.id);
+    if (!waiting || !form) return undefined;
+    await this.d.vault.put("login", form.label, creds, form.origin);
+    await this.d.pendingForms.update((all) => all.filter((f) => f.id !== form.id));
+    await this.note("owner", `(sent their ${form.label} login)`);
+    await this.d.outbound.send(msg.channel, msg.threadId, `Saved your ${form.label} login. Continuing. (You can delete that message from our chat now; I have it.)`);
+    const skill = this.skill(waiting.skill);
+    if (skill?.onInput) await this.guard(waiting, () => skill.onInput!(waiting, "done", this.ctx));
+    return { handled: true, taskId: waiting.id };
   }
 
   /** A secure-link submission arrived (already decrypted for this user only). */

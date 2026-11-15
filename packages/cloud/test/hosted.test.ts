@@ -137,6 +137,7 @@ test("new user on Telegram: onboarding, then a web errand done end to end", { ti
   const url = /https:\/\/momo\.example(\/s\/[\w-]+)/.exec(linkMsg)?.[1];
   if (!url) throw new Error(`expected a secure link, got:\n${sent.map((m) => m.text).join("\n---\n")}`);
   assert.match(linkMsg, /encrypted on your phone/);
+  assert.match(linkMsg, /Text me your email \(or username\) and password/);
 
   // The person opens the link; the page seals the login in the browser.
   const page = await app.request(url);
@@ -544,6 +545,41 @@ test("a text sent while an errand is running is a remark on it, not a new errand
   // Later, the same words are a request again.
   await tg(app, rt, "open the browser and book a table at Nopa");
   assert.equal(sent.filter((m) => m.text === "On it.").length, 2);
+});
+
+test("Momo asks for a password plainly; texting it back signs in, and it is never kept in the conversation", { timeout: 120_000 }, async () => {
+  const { parseLogin } = await import("@momo/agent-core");
+  assert.deepEqual(parseLogin("ana@example.com hunter2"), { identifier: "ana@example.com", password: "hunter2" });
+  assert.deepEqual(parseLogin("ana_l\nhunter2"), { identifier: "ana_l", password: "hunter2" });
+  assert.deepEqual(parseLogin("my email is ana@example.com and password is correct horse 9"), { identifier: "ana@example.com", password: "correct horse 9" });
+  assert.deepEqual(parseLogin("username: ana, pw: hunter2"), { identifier: "ana", password: "hunter2" });
+  for (const no of ["done", "not now", "i don't have an account", "ana@example.com is my email but I forgot the password", "use my google account"]) assert.equal(parseLogin(no), undefined, no);
+
+  const asked: string[] = [];
+  const { rt, app } = runtime(scriptedBooking(site.origin), () => FRIDAY_NOON, { answer: async (_q, context) => (asked.push(context), "ok") });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  site.state.reservations.clear(); // earlier tests booked the 7pm table
+  const logins = site.state.logins;
+  assert.match(await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm"), /Text me your email \(or username\) and password for it, like this:/);
+
+  // A sentence is not a login: nothing is saved and Momo keeps waiting.
+  await tg(app, rt, "one sec, finding it");
+  assert.equal(site.state.logins, logins);
+
+  // The owner just texts it.
+  const ask = await tg(app, rt, `ana@example.com ${PASSWORD}`);
+  assert.match(ask, /Book Nopa, Fri Nov 6, 7pm, 2 people\? .*Reply YES/s);
+  assert.equal(site.state.logins, logins + 1, "signed in with what was texted");
+  assert.ok(sent.some((m) => /^Saved your 127\.0\.0\.1:\d+ login\. Continuing\./.test(m.text)));
+  assert.ok(!sent.some((m) => m.text.includes(PASSWORD)), "never repeated");
+
+  // Later questions see that a login was sent, not the password.
+  await tg(app, rt, "NO");
+  await tg(app, rt, "what did I just send you?");
+  assert.ok(asked.length > 0 && !asked.some((c) => c.includes(PASSWORD)), "the password is not in the conversation memory");
+  assert.match(asked.at(-1)!, /\(sent their 127\.0\.0\.1:\d+ login\)/);
 });
 
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {
