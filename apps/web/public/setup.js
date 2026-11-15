@@ -98,6 +98,8 @@ $("check-model").addEventListener("click", async () => {
   list.textContent = "";
   for (const id of ids) list.append(new Option(id, id));
   const model = modelName();
+  // The usual model isn't on this key: show the model box, which is otherwise tucked away.
+  if (ids.length && !ids.includes(model)) $("model").closest("details").open = true;
   if (ids.length && !ids.includes(model)) return say($("model-status"), `The key works, but it has no model called "${model}". Try one of: ${ids.slice(0, 6).join(", ")}`, "bad");
   say($("model-status"), "The key works.", "ok");
 });

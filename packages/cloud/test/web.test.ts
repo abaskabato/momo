@@ -232,6 +232,8 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.getByRole("heading", { name: /Pick the AI/ }).waitFor();
     await page.fill("#key", "AIza-test-key");
     // A model name the key doesn't have is caught here, not after installing.
+    assert.ok(await page.isHidden("#model"), "the model box is tucked away until someone wants it");
+    await page.click("text=Choose a specific model");
     await page.fill("#model", "gpt");
     await page.click("#check-model");
     await page.getByText('it has no model called "gpt". Try one of: gemini-flash-latest').waitFor();
@@ -243,6 +245,7 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.fill("#bot", "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     await page.click("#check-bot");
     await page.getByText("Found your bot: @ana_momo_bot").waitFor();
+    await page.click("#s-get summary");
     await page.click("[data-os=mac]");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
     assert.equal(download.suggestedFilename(), "Install Momo.zip");
@@ -300,7 +303,9 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     await page.getByText("Getting it takes two minutes").waitFor();
     assert.ok(await page.isHidden("#s-model"), "no AI step");
     assert.ok(await page.isHidden("#s-bot"), "no bot step");
-    assert.deepEqual(await page.$$eval("section.step:not([hidden]) h2 .num", (els) => els.map((e) => e.textContent)), ["1", "2"], "steps renumbered");
+    assert.deepEqual(await page.$$eval("section.step:not([hidden]) h2 .num", (els) => els.map((e) => e.textContent)), ["1"], "one step: download");
+    assert.ok(await page.isHidden("#where"), "choices are folded away under Options");
+    await page.click("#s-get summary");
     await page.click("[data-os=windows]");
     assert.equal(await page.textContent("#download"), "Download Momo for Windows");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
