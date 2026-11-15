@@ -318,6 +318,18 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     assert.match(installer, /irm .*\/install\.ps1 \| iex/);
     const env = envFromInstaller(installer);
     assert.equal(env.MOMO_MODEL, "custom/gemini-test");
+    assert.equal(env.MOMO_AWAKE, undefined, "the computer is kept awake unless the person says otherwise");
+    assert.equal(env.MOMO_MAINTENANCE, undefined, "with the usual nightly rest");
+    assert.match(await page.textContent("#awake-note") ?? "", /wakes itself at 5/);
+    // Someone who wants it awake around the clock (their own visit: each download pairs afresh).
+    const other = await browser.newPage();
+    await other.goto(base);
+    await other.getByText("Getting it takes two minutes").waitFor();
+    await other.click("#settings > summary");
+    await other.selectOption("#awake", "always");
+    const [again] = await Promise.all([other.waitForEvent("download"), other.click("#download")]);
+    assert.equal(envFromInstaller(readFileSync((await again.path())!, "utf8")).MOMO_MAINTENANCE, "off");
+    await other.close();
     assert.equal(env.MOMO_MODEL_BASE_URL, `${base}/api/model/v1`);
     assert.equal(env.MOMO_MODEL_API_KEY, env.MOMO_RELAY_TOKEN);
     assert.equal(env.TELEGRAM_BOT_TOKEN, undefined);

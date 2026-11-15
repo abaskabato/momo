@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import { Redis } from "ioredis";
 import { createApp, type TelegramRelayConfig } from "./app.ts";
 import { Store } from "./store.ts";
+import { KeepAwake, awakeFromEnv } from "./awake.ts";
 import { Notifier, WakeDispatcher, WakeScheduler, httpPush, type PushFn } from "./wake.ts";
 
 export interface CloudOptions {
@@ -142,6 +143,10 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   });
 
   const stop = new AbortController();
+  // On a person's own computer: hold it awake so texts are always answered (MOMO_AWAKE=off to leave it be),
+  // with a nightly rest where the computer can wake itself again (MOMO_MAINTENANCE=03:00-05:00).
+  const awake = isPublic || env.REDIS_URL ? undefined : awakeFromEnv(env); // a server never sleeps
+  const keepAwake = awake?.on ? new KeepAwake({ window: awake.window, busy: () => runtime.busy, log: (m) => console.error(m) }) : undefined;
   return {
     runtime,
     model,
@@ -155,6 +160,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       ];
       // Copying a big browser profile can take minutes; Momo answers texts meanwhile.
       if (browser instanceof VisibleBrowser) void browser.prepare().then((r) => console.log(`  sign-ins and saved passwords: ${r}`), () => {});
+      if (awake) notes.push(awake.note);
+      keepAwake?.start();
       if (pc) notes.push(env.MOMO_ASK === "commands" ? "files and commands: full access to this computer (it looks freely; every change asks for your YES)" : "files and commands: full access to this computer (it asks only before deleting, uninstalling or replacing a file; MOMO_ASK=commands makes it ask before every change)");
       if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {
@@ -205,6 +212,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       return notes;
     },
     stop: () => {
+      keepAwake?.stop();
       stop.abort();
       runtime.stop();
     },

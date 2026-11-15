@@ -183,6 +183,8 @@ async function settings() {
   lines.push(`MOMO_MASTER_KEY=${b64(crypto.getRandomValues(new Uint8Array(32)))}`, "MOMO_SINGLE_OWNER=1");
   if ($("where").value !== "web") lines.push("MOMO_DESKTOP=local");
   if ($("where").value === "full") lines.push("MOMO_ACCESS=full");
+  if ($("awake").value === "always") lines.push("MOMO_MAINTENANCE=off");
+  if ($("awake").value === "off") lines.push("MOMO_AWAKE=off");
   if ($("bland").value.trim()) lines.push(`BLAND_API_KEY=${$("bland").value.trim()}`);
   if (relay) lines.push(`MOMO_RELAY_URL=${origin}`, `MOMO_RELAY_TOKEN=${relay.token}`);
   else say(st, "Note: this site's relay didn't answer, so secure links will only open on this computer.");
@@ -248,8 +250,21 @@ $("download").addEventListener("click", async () => {
   }
 });
 
+// What staying awake means on the computer that was picked.
+function awakeNote() {
+  $("awake-note").textContent = {
+    rest: os === "windows"
+      ? "Momo stops this computer from going to sleep, so a text is answered at any hour; the screen still turns off. From 3 to 5 at night it lets go, so Windows can sleep, update or restart, and the computer wakes itself at 5. A laptop still sleeps when its lid is closed."
+      : "Momo stops this computer from going to sleep, so a text is answered at any hour; the screen still turns off. The nightly rest is for Windows only: this computer couldn't wake itself afterwards, so it stays awake. A laptop still sleeps when its lid is closed.",
+    always: "Momo stops this computer from going to sleep at any hour; the screen still turns off. A laptop still sleeps when its lid is closed.",
+    off: "Momo leaves the computer alone. Texts sent while it sleeps are answered when it wakes.",
+  }[$("awake").value];
+}
+$("awake").addEventListener("change", awakeNote);
+
 function pickOs(which) {
   os = which;
+  awakeNote();
   for (const b of document.querySelectorAll("[data-os]")) b.setAttribute("aria-pressed", String(b.dataset.os === which));
   $("download").textContent = `Download Momo for ${OS[which].label}`;
 }

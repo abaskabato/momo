@@ -181,7 +181,8 @@ echo
 if grep -q "Telegram: text" "$LOG"; then
   say "Momo is running."
   grep "Telegram: text" "$LOG" | tail -n1 | sed 's/^ *//'
-  echo "Say hi to your bot. Leave this computer on: Momo works while it's awake."
+  if grep -q '^MOMO_AWAKE=off' "$DIR/momo.env"; then echo "Say hi to your bot. Leave this computer on: Momo works while it's awake."
+  else echo "Say hi to your bot. Momo keeps this computer awake so it can always answer: don't shut it down, and leave a laptop's lid open."; fi
 else
   echo "Momo didn't start cleanly. The last lines of its log ($LOG):"
   tail -n 15 "$LOG"

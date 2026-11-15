@@ -119,6 +119,31 @@ $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Register-ScheduledTask -TaskName "Momo" -Action $Action -Trigger $Trigger -Settings $Settings -Description "Momo: text it, things get done" -Force | Out-Null
 Start-ScheduledTask -TaskName "Momo"
 
+# Momo holds this computer awake while it runs, except in a nightly maintenance window (03:00-05:00 unless
+# momo.env says otherwise) when it may sleep, update or restart. This wakes it again when the window ends.
+$Awake = (Get-Content $EnvFile | Where-Object { $_ -match '^MOMO_AWAKE=' } | Select-Object -Last 1) -replace '^MOMO_AWAKE=', ''
+$Window = (Get-Content $EnvFile | Where-Object { $_ -match '^MOMO_MAINTENANCE=' } | Select-Object -Last 1) -replace '^MOMO_MAINTENANCE=', ''
+if (-not $Window) { $Window = "03:00-05:00" }
+$Rest = ""
+Unregister-ScheduledTask -TaskName "Momo wake" -Confirm:$false -ErrorAction SilentlyContinue
+if ($Awake -ne "off" -and $Window -match '^\s*\d{1,2}(:\d{2})?\s*-\s*(\d{1,2})(:(\d{2}))?\s*$') {
+  try {
+    $End = "{0:00}:{1:00}" -f [int]$Matches[2], [int]("0" + $Matches[4])
+    $WakeAction = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c exit"
+    $WakeTrigger = New-ScheduledTaskTrigger -Daily -At $End
+    $WakeSettings = New-ScheduledTaskSettingsSet -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Register-ScheduledTask -TaskName "Momo wake" -Action $WakeAction -Trigger $WakeTrigger -Settings $WakeSettings -Description "Wakes this computer when Momo's maintenance window ends" -Force | Out-Null
+    # Let scheduled tasks wake the computer while it's plugged in (Windows turns this off on some PCs).
+    & powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_SLEEP RTCWAKE 1 2>$null | Out-Null
+    & powercfg /SETACTIVE SCHEME_CURRENT 2>$null | Out-Null
+    $Rest = " Between $($Window -replace '\s*-\s*', ' and ') it may sleep or restart for updates, and wakes itself after."
+  } catch {
+    # Without the wake-up Momo would stay asleep after the window, so it keeps the computer awake through it instead.
+    Add-Content -Path $EnvFile -Value "MOMO_MAINTENANCE=off" -Encoding ascii
+    Restart-ScheduledTask -TaskName "Momo" -ErrorAction SilentlyContinue
+  }
+}
+
 # 5. Wait for it to say hello
 for ($i = 0; $i -lt 60; $i++) {
   if (Select-String -Path $Log -Pattern "Telegram: text|Error" -Quiet) { break }
@@ -129,7 +154,8 @@ $hello = Select-String -Path $Log -Pattern "Telegram: text" | Select-Object -Las
 if ($hello) {
   Say "Momo is running."
   Write-Host $hello.Line.Trim()
-  Write-Host "Say hi to your bot. Leave this computer on: Momo works while it's awake."
+  if ($Awake -eq "off") { Write-Host "Say hi to your bot. Leave this computer on: Momo works while it's awake." }
+  else { Write-Host "Say hi to your bot. Momo keeps this computer awake so it can always answer: don't shut it down, and leave a laptop's lid open.$Rest" }
   Write-Host "Logs: $Log    Stop: Unregister-ScheduledTask Momo    Update: run this installer again"
 } else {
   Write-Host "Momo didn't start cleanly. The last lines of its log ($Log):"

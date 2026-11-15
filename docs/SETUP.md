@@ -32,7 +32,7 @@ to get one) and a Telegram bot token from @BotFather, checks both in your
 browser, and puts them in the same downloaded file. Nothing you type reaches
 the site.
 
-Leave the computer on: Momo works while it's awake. Open the installer again
+Momo keeps the computer awake while it runs, so a text is answered at any hour (the screen still turns off; a laptop still sleeps with its lid closed, and `MOMO_AWAKE=off` in `~/.momo/momo.env` leaves the computer be). On Windows there is a nightly maintenance window, 03:00-05:00, when the computer may sleep, update or restart; it wakes itself at the end. `MOMO_MAINTENANCE=01:00-02:30` moves it, `MOMO_MAINTENANCE=off` removes it; run the installer again after changing it. Open the installer again
 to update; your saved logins and settings are kept. Logs are in
 `~/.momo/momo.log`.
 

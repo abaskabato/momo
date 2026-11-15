@@ -79,6 +79,12 @@ export interface HostedOptions {
 export class HostedRuntime {
   private readonly o: HostedOptions;
   private running = false;
+  private working = 0;
+
+  /** A message or errand is being worked on right now. */
+  get busy(): boolean {
+    return this.working > 0;
+  }
   /** Identifies this process's locks, so one left by a killed copy can be told apart. */
   private readonly bootId = randomBytes(8).toString("hex");
   /**
@@ -266,10 +272,13 @@ export class HostedRuntime {
         const blob = (await this.o.redis.lmove(current, current, "RIGHT", "LEFT")) ?? (await this.o.redis.lmove(queue, current, "RIGHT", "LEFT"));
         if (!blob) break;
         await this.o.redis.set(lock, this.bootId, "PX", LOCK_MS);
+        this.working++;
         try {
           await this.process(uid, JSON.parse(this.o.keys.decrypt(uid, "job", blob)) as Job);
         } catch (e) {
           this.o.log?.(`job for ${uid.slice(0, 8)} failed: ${(e as Error).message}`);
+        } finally {
+          this.working--;
         }
         await this.o.redis.del(current);
       }

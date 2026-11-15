@@ -26,7 +26,7 @@
     <p class="note" id="get-status" role="status"></p>
     <div id="after" hidden>
       <p class="note" id="os-how"></p>
-      <p class="lede small">When it says it's running, tap <a id="bot-link" href="#" rel="noopener">your bot</a> and say hi. Leave the computer on: Momo works while it's awake.</p>
+      <p class="lede small">When it says it's running, tap <a id="bot-link" href="#" rel="noopener">your bot</a> and say hi. Momo keeps the computer awake so it can always answer: just don't shut it down, and leave a laptop's lid open.</p>
     </div>
   </section>
 
@@ -88,6 +88,13 @@
 
     <section class="step">
       <h2>This computer</h2>
+      <label for="awake">While Momo runs, this computer</label>
+      <select id="awake">
+        <option value="rest">stays awake, with a rest from 3 to 5 at night</option>
+        <option value="always">stays awake around the clock</option>
+        <option value="off">sleeps whenever it usually does</option>
+      </select>
+      <p class="note" id="awake-note"></p>
       <div class="tabs" role="group" aria-label="Your computer">
         <button type="button" data-os="mac" aria-pressed="false">Mac</button>
         <button type="button" data-os="windows" aria-pressed="false">Windows</button>
