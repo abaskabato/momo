@@ -91,6 +91,7 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Brows
   const tools: string[] = [];
   const trace: string[] = [];
   const counting: Planner = {
+    keepsOwnContext: planner.keepsOwnContext,
     async next(system, history, specs) {
       // What came back from the previous step.
       for (const b of history.at(-1)?.content ?? []) {

@@ -41,6 +41,8 @@ export interface Turn {
 /** Decides the next step. Claude in production; scripted in tests. */
 export interface Planner {
   next(system: string, history: Turn[], tools: ToolSpec[]): Promise<Block[]>;
+  /** True when the history must be sent back untouched (the model clears old context itself). */
+  readonly keepsOwnContext?: boolean;
 }
 
 export interface ToolSpec {
@@ -362,7 +364,8 @@ export class WebTaskSkill implements Skill {
     while (s.steps < MAX_STEPS) {
       s.steps++;
       if (s.steps % PROGRESS_EVERY === 0) await ctx.reply(task, `Still on it${pageUrl() ? ` (on ${new URL(pageUrl()!).host || "the web"})` : ""}.`);
-      compact(s.history, s.tight);
+      // Models that manage their own context (Claude) need the history sent back exactly as it was.
+      if (s.tight || !this.planner.keepsOwnContext) compact(s.history, s.tight);
       let blocks: Block[];
       for (;;) {
         try {

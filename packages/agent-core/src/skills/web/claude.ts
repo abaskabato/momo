@@ -15,18 +15,39 @@ export class ClaudePlanner implements Planner {
     this.model = model;
   }
 
+  /**
+   * Claude's thinking blocks are only valid while everything before them is sent back exactly as it was,
+   * so the errand's history must not be trimmed on this side. Old page views are cleared by the API instead.
+   */
+  readonly keepsOwnContext = true;
+
   async next(system: string, history: Turn[], tools: ToolSpec[]): Promise<Block[]> {
-    const response = await this.client.beta.messages.create({
-      model: this.model,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      output_config: { effort: "high" },
-      system,
-      tools: tools as Anthropic.Beta.BetaTool[],
-      // Thinking blocks are passed back unchanged, as the API requires.
-      messages: history as Anthropic.Beta.BetaMessageParam[],
-    });
+    const ask = () =>
+      this.client.beta.messages.create({
+        model: this.model,
+        max_tokens: 16000,
+        betas: ["server-side-fallback-2026-07-01", "context-management-2025-06-27"],
+        fallbacks: "default",
+        output_config: { effort: "high" },
+        // Server-side clearing of old tool results doesn't count as editing the conversation.
+        context_management: { edits: [{ type: "clear_tool_uses_20250919" }] },
+        system,
+        tools: tools as Anthropic.Beta.BetaTool[],
+        // Thinking blocks are passed back unchanged, as the API requires.
+        messages: history as Anthropic.Beta.BetaMessageParam[],
+      });
+    let response: Awaited<ReturnType<typeof ask>>;
+    try {
+      response = await ask();
+    } catch (e) {
+      // History from before this rule was kept (an errand saved by an older Momo, or one cut down to fit a
+      // small allowance): the documented recovery is to drop the thinking blocks and ask once more.
+      if (!(e instanceof Anthropic.BadRequestError) || !/thinking/i.test(e.message) || !/signature|bound to a different conversation/i.test(e.message)) throw e;
+      for (const turn of history) {
+        if (turn.role === "assistant") turn.content = turn.content.filter((b) => b.type !== "thinking" && b.type !== "redacted_thinking");
+      }
+      response = await ask();
+    }
     if (response.stop_reason === "refusal") return [{ type: "text", text: "I can't help with that one." }];
     return response.content as Block[];
   }
