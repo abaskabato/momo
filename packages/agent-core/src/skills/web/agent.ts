@@ -27,7 +27,7 @@ import { RequestTooLarge } from "../../llm.ts";
 
 export type Block =
   | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown>; /** Provider data that must be sent back untouched with this call (Gemini's thought signature). */ extra?: unknown }
   | { type: "tool_result"; tool_use_id: string; content: string | ResultPart[]; is_error?: boolean }
   | { type: string; [k: string]: unknown };
 

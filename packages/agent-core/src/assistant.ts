@@ -77,6 +77,7 @@ const CHAT_KEEP = 24;
 const DO_HINT =
   "You can also act: you have a web browser, the owner's computer and apps, and can phone businesses. " +
   "If this message asks for something that needs any of those (look at a page or site, open or check something, find, compare, book, buy, send, fill in, download, anything on the computer), " +
+  "or asks for a fact that changes and should be looked up rather than remembered (opening hours today, prices, availability, schedules, a delivery's status, the weather, news), " +
   "reply with exactly the single word DO and nothing else, and it will be done. Otherwise just answer.";
 
 /** A question about what happened, not a new errand ("did you book it?", "what is done"). */
@@ -275,7 +276,11 @@ export class Assistant {
 
     // "did you book it?" is a question about what happened, not a new booking.
     const asking = !!this.d.answer && ASKING.test(text) && text.length < 80;
-    let skill = asking ? undefined : this.d.skills.find((s) => s.matches(text));
+    // Sent while Momo was busy with an errand ("I see you opened the browser", "make it Tuesday"): usually a
+    // remark on that errand, so its wording alone doesn't start a new one; the model decides.
+    const busy = JSON.parse((await this.d.memory.get("busy.last")) ?? "null") as { from: number; until: number; what: string } | null;
+    const during = !!this.d.answer && !!busy && msg.receivedAt >= busy.from - 1000 && msg.receivedAt + 1000 < busy.until && !/https?:\/\//i.test(text);
+    let skill = asking || during ? undefined : this.d.skills.find((s) => s.matches(text));
     if (!skill && (await this.onboard(text, say))) return { handled: true };
     if (!skill && this.d.answer) {
       // Not obviously an errand by its wording: let the model say whether it's something to DO.
@@ -284,7 +289,11 @@ export class Assistant {
       const city = await this.d.memory.get("owner.city");
       const recent = await this.recentConversation();
       const context = [name && `Owner: ${name}.`, city && `City: ${city}.`, `Now: ${this.ctx.now().toString()}`, recent && `\nRecent conversation (oldest first):\n${recent}`].filter(Boolean).join(" ");
-      const reply = await this.d.answer(text, doer ? `${context}\n\n${DO_HINT}` : context);
+      const aside = during
+        ? `\n\nThe owner sent this while you were busy with the errand "${busy!.what}", which has since ended (see the recent conversation for how). ` +
+          "If it is a remark about that errand, or adds or corrects a detail of it, do not reply DO: answer in a sentence or two, saying how that errand ended and, if it didn't finish, offering to try again with what they added. Reply DO only if it is clearly a separate new request."
+        : "";
+      const reply = await this.d.answer(text, doer ? `${context}\n\n${DO_HINT}${aside}` : context);
       if (doer && /^\W*DO\W*$/i.test(reply.trim())) {
         skill = doer;
       } else {
@@ -406,6 +415,7 @@ export class Assistant {
 
   /** A failed step fails the task and tells the owner; it is never silently retried. */
   private async guard(task: Task, fn: () => Promise<unknown>): Promise<void> {
+    const from = Date.now();
     try {
       await fn();
     } catch (e) {
@@ -413,6 +423,8 @@ export class Assistant {
       await this.d.tasks.save(task, `error: ${(e as Error).message}`);
       await this.d.outbound.send(task.channel, task.threadId, failureText(e as Error));
     }
+    // When Momo was last busy, so texts sent meanwhile can be told from new requests.
+    await this.d.memory.set("busy.last", JSON.stringify({ from, until: Date.now(), what: task.request.slice(0, 200) })).catch(() => {});
   }
 }
 

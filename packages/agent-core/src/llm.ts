@@ -74,7 +74,7 @@ export function createAnswerer(spec: string, env = process.env, fetchImpl: typeo
 type ChatMessage =
   | { role: "system"; content: string }
   | { role: "user"; content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> }
-  | { role: "assistant"; content: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> }
+  | { role: "assistant"; content: string; tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; extra_content?: unknown }> }
   | { role: "tool"; tool_call_id: string; content: string };
 
 /** Momo's internal turns -> chat messages. Provider-specific blocks (e.g. thinking) are dropped. */
@@ -89,7 +89,7 @@ export function toChatMessages(system: string, history: Turn[], opts: { images?:
         role: "assistant",
         // An empty string, not null: some providers insist every message's content is a string.
         content: text,
-        ...(calls.length && { tool_calls: calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.input) } })) }),
+        ...(calls.length && { tool_calls: calls.map((c) => ({ id: c.id, type: "function" as const, function: { name: c.name, arguments: JSON.stringify(c.input) }, ...(c.extra !== undefined && { extra_content: c.extra }) })) }),
       });
     } else {
       // Tool messages must directly follow their calls; images go in one user message after them.
@@ -118,7 +118,7 @@ export function toChatMessages(system: string, history: Turn[], opts: { images?:
 }
 
 /** A chat completion -> Momo blocks. Tolerates models that return malformed tool JSON. */
-export function fromChatChoice(message: { content?: string | null; tool_calls?: Array<{ id?: string; function: { name: string; arguments: string } }> }): Block[] {
+export function fromChatChoice(message: { content?: string | null; tool_calls?: Array<{ id?: string; function: { name: string; arguments: string }; extra_content?: unknown }> }): Block[] {
   const blocks: Block[] = [];
   if (message.content?.trim()) blocks.push({ type: "text", text: message.content });
   for (const [i, c] of (message.tool_calls ?? []).entries()) {
@@ -128,7 +128,8 @@ export function fromChatChoice(message: { content?: string | null; tool_calls?: 
     } catch {
       input = {};
     }
-    blocks.push({ type: "tool_use", id: c.id || `call_${Date.now()}_${i}`, name: c.function.name, input });
+    // Gemini signs each call and refuses the next request unless the signature comes back with it.
+    blocks.push({ type: "tool_use", id: c.id || `call_${Date.now()}_${i}`, name: c.function.name, input, ...(c.extra_content !== undefined && { extra: c.extra_content }) });
   }
   return blocks;
 }

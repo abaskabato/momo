@@ -44,6 +44,8 @@ export interface EvalResult {
   seconds: number;
   steps: number;
   tools: string[];
+  /** Each step: what Momo did and the start of what it saw back. For working out why an errand failed. */
+  trace?: string[];
   /** The approval summary or final reply. */
   detail: string;
 }
@@ -87,9 +89,17 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Brows
   const { answerer, computers, timeoutMs = 6 * 60_000 } = o;
   const t0 = Date.now();
   const tools: string[] = [];
+  const trace: string[] = [];
   const counting: Planner = {
     async next(system, history, specs) {
+      // What came back from the previous step.
+      for (const b of history.at(-1)?.content ?? []) {
+        if (b.type !== "tool_result") continue;
+        const c = (b as { content: unknown }).content;
+        trace.push(`   -> ${(typeof c === "string" ? c : "(screenshot)").replace(/\s+/g, " ").slice(0, 300)}`);
+      }
       const blocks = await planner.next(system, history, specs);
+      for (const b of blocks) if (b.type === "tool_use") trace.push(`${(b as { name: string }).name} ${JSON.stringify((b as { input: unknown }).input).slice(0, 200)}`);
       for (const b of blocks) if (b.type === "tool_use") tools.push(String((b as { name: string }).name));
       return blocks;
     },
@@ -108,7 +118,7 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Brows
   await agent.memory.set("owner.name", "Ana");
   await agent.memory.set("owner.city", "San Francisco");
   const say = (text: string) => agent.assistant.handle({ channel: "telegram", from: "eval", threadId: "eval", text, receivedAt: Date.now() });
-  const result = (outcome: Outcome, detail: string): EvalResult => ({ id: errand.id, outcome, seconds: Math.round((Date.now() - t0) / 1000), steps: tools.length, tools, detail: detail.slice(0, 400) });
+  const result = (outcome: Outcome, detail: string): EvalResult => ({ id: errand.id, outcome, seconds: Math.round((Date.now() - t0) / 1000), steps: tools.length, tools, trace, detail: detail.slice(0, 400) });
   const mentions = (s: string) => (errand.mustMention ?? []).every((m) => new RegExp(m, "i").test(s));
 
   const run = async (): Promise<EvalResult> => {

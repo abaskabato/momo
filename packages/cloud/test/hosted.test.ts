@@ -510,6 +510,42 @@ test("a small AI allowance: the errand cuts pages down and carries on instead of
   assert.ok(sizes.some((n) => n > 1300) && sizes.at(-1)! <= 1300, `sizes: ${sizes}`);
 });
 
+test("a text sent while an errand is running is a remark on it, not a new errand", { timeout: 60_000 }, async () => {
+  const planner: Planner = {
+    async next() {
+      await new Promise((r) => setTimeout(r, 2500));
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Found a table at Nopa." } } as Block];
+    },
+  };
+  const asked: string[] = [];
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON, {
+    answer: async (_q, context) => {
+      asked.push(context);
+      return "Yes, that was me. I found a table at Nopa.";
+    },
+  });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  const post = (text: string, date: number) =>
+    app.request("/v1/hosted/telegram", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": "tg-secret" },
+      body: JSON.stringify({ update_id: ++updateId, message: { text, date, chat: { id: 777, type: "private" } } }),
+    });
+  const now = Math.floor(Date.now() / 1000);
+  await post("book a table at Nopa", now);
+  await post("i see you open the browser", now); // "open" alone used to start a second errand
+  await rt.drain();
+  assert.equal(sent.filter((m) => m.text === "On it.").length, 1, "one errand, not two");
+  assert.equal(sent.at(-1)!.text, "Yes, that was me. I found a table at Nopa.");
+  assert.match(asked.at(-1)!, /sent this while you were busy with the errand "book a table at Nopa"/);
+
+  // Later, the same words are a request again.
+  await tg(app, rt, "open the browser and book a table at Nopa");
+  assert.equal(sent.filter((m) => m.text === "On it.").length, 2);
+});
+
 test("reminders fire on time via the hosted timer sweep; UNDO cancels", { timeout: 30_000 }, async () => {
   const { rt, app } = runtime(scriptedBooking(site.origin), () => now);
   await tg(app, rt, "hi");
