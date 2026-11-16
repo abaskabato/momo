@@ -67,3 +67,22 @@ body.home footer.legal a { color: var(--fg); }
 /* The line that says a key was checked keeps its place, so nothing jumps when it appears. */
 .steps #model-status:empty, .steps #bot-status:empty { display: block; }
 .steps #model-status, .steps #bot-status { min-height: 1.5em; margin: 8px 0 0; }
+
+/* The list: written out, then crossed off one line at a time. */
+.todo { list-style: none; margin: 0 0 31px; padding: 0; }
+.todo li { font: 400 24px/1.3 var(--serif); letter-spacing: -0.01em; margin: 0 0 6px; }
+.todo s {
+  text-decoration: none;
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 58% / 0 1.5px;
+  animation: cross 0.5s ease-out forwards, fade 0.5s ease-out forwards;
+}
+.todo li:nth-child(1) s { animation-delay: 0.7s, 0.9s; }
+.todo li:nth-child(2) s { animation-delay: 1.4s, 1.6s; }
+.todo li:nth-child(3) s { animation-delay: 2.1s, 2.3s; }
+.todo li:nth-child(4) s { animation-delay: 2.8s, 3s; }
+@keyframes cross { to { background-size: 100% 1.5px; } }
+@keyframes fade { to { color: var(--mut); } }
+@media (prefers-reduced-motion: reduce) {
+  .todo s { animation: none; background-size: 100% 1.5px; color: var(--mut); }
+}
+@media (max-width: 560px) { .todo li { font-size: 21px; } .todo { margin-bottom: 26px; } }

@@ -229,7 +229,7 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-pro-latest" }] }) }));
     await page.route("https://api.telegram.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, result: { username: "ana_momo_bot" } }) }));
     await page.goto(base);
-    await page.getByRole("heading", { name: /Get your time back/ }).waitFor();
+    await page.getByRole("heading", { name: /Text Momo your list/ }).waitFor();
     // With nothing pre-filled, the two things to paste are right on the page, as numbered steps.
     await page.waitForSelector("#key", { state: "visible" });
     assert.ok(await page.isVisible("#bot"), "the bot step is on the page too");
