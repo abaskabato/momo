@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Momo</title>
 <meta name="description" content="Momo is a personal assistant you text. It runs on your own computer, uses websites and apps the way you do, and comes back when the errand is done.">
-<meta name="theme-color" content="#05060a">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/home.css">
@@ -14,14 +15,16 @@
 </head>
 <body class="home">
 <header class="site">
-  <a href="/" class="wordmark"><i class="orb" aria-hidden="true"></i>Momo</a>
+  <a href="/" class="wordmark">momo</a>
   <nav><a href="https://github.com/abaskabato/momo" rel="noopener">Source</a></nav>
 </header>
 <main class="home">
   <section class="hero" id="s-get">
-    <p class="eyebrow"><i aria-hidden="true"></i>Private by design</p>
-    <h1>Text Momo.<br><span class="grad">It gets done.</span></h1>
-    <p class="lede">A personal assistant that lives on your own computer, not in someone else's cloud. One text, and it books, orders and sorts things out the way you would.</p>
+    <h1>Text Momo.<br><span>It gets done.</span></h1>
+    <div class="example" id="demo" aria-label="An example">
+      <p class="ask sent">Table for 2 at Nopa, Friday at 7</p>
+      <p class="done in">Booked. Friday 7:15pm, under your name.</p>
+    </div>
     <button id="download" type="button">Download Momo</button>
     <p class="note" id="intro-ready" hidden>Getting it takes two minutes: open the file, then tap the link to start texting.</p>
     <p class="note" id="intro-manual" hidden>Momo runs on your own AI key and Telegram bot. Add them once under <a href="#settings" id="open-settings">Settings</a>, then download.</p>
@@ -33,38 +36,11 @@
     </div>
   </section>
 
-  <figure class="demo" aria-label="An example conversation with Momo">
-    <div class="pane">
-    <div class="pane-top"><span><i class="orb" aria-hidden="true"></i>Momo</span><span>on your computer</span></div>
-    <div class="thread" id="demo">
-      <p class="msg you">Table for 2 at Nopa, Friday at 7</p>
-      <p class="msg momo">On it.</p>
-      <p class="msg momo">Booked. Nopa, Friday 7:15pm, table for 2, under your name. Confirmation TN-48213.</p>
-    </div>
-    </div>
-    <figcaption>An example. One text; Momo tells you what it did.</figcaption>
-  </figure>
-
-  <section class="yours" aria-labelledby="yours-h">
-    <h2 id="yours-h">Yours, not ours.</h2>
-    <ul>
-      <li>
-        <span>01 / Local</span>
-        <h3>It runs on your computer</h3>
-        <p>Momo does your errands in a browser on your own machine, signed in as you. There is no Momo account to create and no cloud of ours doing the work.</p>
-      </li>
-      <li>
-        <span>02 / Sealed</span>
-        <h3>Your passwords stay locked</h3>
-        <p>Logins and cards are kept encrypted on your computer. The AI reads the page it is working on with those masked out; it never sees them.</p>
-      </li>
-      <li>
-        <span>03 / Open</span>
-        <h3>Nothing hidden</h3>
-        <p>Every line of Momo is public. <a href="https://github.com/abaskabato/momo" rel="noopener">Read the source</a>, or have someone you trust read it.</p>
-      </li>
-    </ul>
-  </section>
+  <ul class="private" aria-label="Private">
+    <li><b>Runs on your computer</b>Not in a cloud. Your errands happen on your own machine, signed in as you.</li>
+    <li><b>Passwords stay locked</b>Encrypted on your computer. The AI never sees them.</li>
+    <li><b>Open source</b>Nothing hidden. <a href="https://github.com/abaskabato/momo" rel="noopener">Read every line.</a></li>
+  </ul>
 
   <details class="settings" id="settings">
     <summary>Settings</summary>
