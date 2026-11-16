@@ -122,8 +122,14 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   // On the owner's own computer commands run without a question each (deleting, uninstalling and replacing
   // files still ask). MOMO_ASK=commands goes back to asking before every change.
   // A free reservation or appointment the owner asked for is made without a YES first, then reported with how
-  // to cancel; anything that costs money, sends a message or places a call still asks. MOMO_ASK=bookings asks again.
-  const web = new WebTaskSkill(planner, browser, computers, pc, { freeCommands: env.MOMO_ASK !== "commands", freeBookings: !env.MOMO_ASK });
+  // to cancel. MOMO_ASK=money asks before purchases, messages, calls and deletions; =bookings before free bookings too.
+  const web = new WebTaskSkill(planner, browser, computers, pc, {
+    freeCommands: env.MOMO_ASK !== "commands",
+    freeBookings: !env.MOMO_ASK || env.MOMO_ASK === "money",
+    // Text and done (the default): nothing waits for a YES, except a purchase above MOMO_SPEND_LIMIT (US dollars; "none" lifts it).
+    noAsk: !env.MOMO_ASK,
+    spendLimit: env.MOMO_SPEND_LIMIT === "none" ? Infinity : Number(env.MOMO_SPEND_LIMIT ?? 200) || 0,
+  });
   const runtime = new HostedRuntime({
     redis: kv,
     keys: new UserKeys(Buffer.from(master, "base64")),
@@ -179,7 +185,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           notes.push(`iMessage gateway: on (texts to this Mac's Messages are passed to ${env.MOMO_RELAY_URL}, answers are sent from here)`);
         }
       }
-      if (pc) notes.push(env.MOMO_ASK === "commands" ? "files and commands: full access to this computer (it looks freely; every change asks for your YES)" : "files and commands: full access to this computer (it asks only before deleting, uninstalling or replacing a file; MOMO_ASK=commands makes it ask before every change)");
+      if (pc) notes.push(env.MOMO_ASK === "commands" ? "files and commands: full access to this computer (it looks freely; every change asks for your YES)" : !env.MOMO_ASK ? "files and commands: full access to this computer (it does what the errand needs and tells you what it changed; MOMO_ASK=money makes it ask before deleting)" : "files and commands: full access to this computer (it asks only before deleting, uninstalling or replacing a file; MOMO_ASK=commands makes it ask before every change)");
       if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {
         const me = await telegram.me();
@@ -196,7 +202,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           );
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
-      notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses, after your YES)" : env.MOMO_CALLS === "relay" && relay ? `phone calls: on, through ${relay.url} (Momo can phone businesses, after your YES)` : "phone calls: off (add BLAND_API_KEY to turn them on)");
+      notes.push(!env.MOMO_ASK ? `asking: text and done (nothing waits for a YES${env.MOMO_SPEND_LIMIT === "none" ? "" : `, except a purchase over $${Number(env.MOMO_SPEND_LIMIT ?? 200) || 0}`}; MOMO_ASK=money brings the questions back)` : `asking: MOMO_ASK=${env.MOMO_ASK}`);
+      notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses)" : env.MOMO_CALLS === "relay" && relay ? `phone calls: on, through ${relay.url} (Momo can phone businesses)` : "phone calls: off (add BLAND_API_KEY to turn them on)");
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
       if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
       else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");

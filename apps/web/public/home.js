@@ -5,23 +5,17 @@ const ERRANDS = [
   [
     ["you", "Table for 2 at Nopa, Friday at 7"],
     ["momo", "On it."],
-    ["momo", "Nopa has 7:15pm on Friday for 2. Book it? Reply YES"],
-    ["you", "yes"],
-    ["momo", "Booked. Friday 7:15pm, table for 2."],
+    ["momo", "Booked. Nopa, Friday 7:15pm, table for 2, under your name. Confirmation TN-48213."],
   ],
   [
     ["you", "Cheapest nonstop from SFO to LAX next Friday morning"],
     ["momo", "On it."],
-    ["momo", "Alaska at 7:05am, $89, nonstop. Buy it? Reply YES"],
-    ["you", "yes"],
-    ["momo", "Bought. Your confirmation is in your email."],
+    ["momo", "Bought. Alaska 7:05am nonstop, $89, seat 14C. The confirmation is in your email; free to cancel for 24 hours."],
   ],
   [
     ["you", "Clear the junk out of my Downloads folder"],
     ["momo", "On it."],
-    ["momo", "14 old installers and duplicates, 2.1 GB. Delete them? Reply YES"],
-    ["you", "yes"],
-    ["momo", "Done. 2.1 GB freed."],
+    ["momo", "Done. Moved 14 old installers and duplicates to the Recycle Bin: 2.1 GB freed."],
   ],
 ];
 

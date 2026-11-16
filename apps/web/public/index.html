@@ -35,11 +35,9 @@
     <div class="thread" id="demo">
       <p class="msg you">Table for 2 at Nopa, Friday at 7</p>
       <p class="msg momo">On it.</p>
-      <p class="msg momo">Nopa has 7:15pm on Friday for 2. Book it? Reply YES</p>
-      <p class="msg you">yes</p>
-      <p class="msg momo">Booked. Friday 7:15pm, table for 2.</p>
+      <p class="msg momo">Booked. Nopa, Friday 7:15pm, table for 2, under your name. Confirmation TN-48213.</p>
     </div>
-    <figcaption>An example. Momo asks before it books, pays or sends.</figcaption>
+    <figcaption>An example. One text; Momo tells you what it did.</figcaption>
   </figure>
 
   <details class="settings" id="settings">
@@ -82,12 +80,15 @@
         <option value="full">everything on this computer: apps, files and commands</option>
       </select>
       <p class="note" id="where-note">Momo uses websites in a browser window of its own. It starts with a copy of your Chrome or Edge sign-ins and saved passwords, so it's already logged in where you are; your own browser isn't touched.</p>
+      <label for="limit">Check with me before spending more than</label>
+      <input id="limit" inputmode="numeric" autocomplete="off" spellcheck="false" value="$200">
+      <p class="note">Momo does what you text and tells you what it did; it doesn't stop to ask. This is the one exception: a single purchase above this amount waits for your OK. Clear the box for no limit.</p>
       <div id="calls-own">
       <label for="bland">Phone calls (optional)</label>
       <input id="bland" autocomplete="off" spellcheck="false" placeholder="Bland AI key, to let Momo phone businesses">
-      <p class="note">For places with no online booking, a voice agent phones them with your request, only after your YES. Get a key at <a href="https://app.bland.ai" target="_blank" rel="noopener">bland.ai</a>; calls are billed by Bland per minute. Leave empty to skip.</p>
+      <p class="note">For places with no online booking, a voice agent phones them with your request. Get a key at <a href="https://app.bland.ai" target="_blank" rel="noopener">bland.ai</a>; calls are billed by Bland per minute. Leave empty to skip.</p>
       </div>
-      <p class="note" id="calls-included" hidden>Phone calls are included: for places with no online booking, Momo phones them with your request, only after your YES.</p>
+      <p class="note" id="calls-included" hidden>Phone calls are included: for places with no online booking, Momo phones them with your request.</p>
     </section>
 
     <section class="step">

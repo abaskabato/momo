@@ -865,3 +865,33 @@ test("onboarding: just the contact details, or an errand instead of closing the 
   assert.match(await tg(b.app, b.rt, "gmail"), /^Before I connect Gmail: close all your Chrome windows once/);
   assert.equal(await tg(b.app, b.rt, "book a table for 2 at Nopa Friday 7pm"), "Booked.");
 });
+
+test("text and done: a booking that costs money goes through without a YES; only a purchase over the limit stops to ask", { timeout: 120_000 }, async () => {
+  const own = (limit: number) => {
+    const planner = scriptedBooking(site.origin); // it asks approval for "$25/person no-show fee", amount 50
+    return runtime(planner, () => FRIDAY_NOON, { skills: () => [new RemindersSkill(), new WebTaskSkill(planner, browser, undefined, undefined, { noAsk: true, spendLimit: limit })] });
+  };
+  const { rt, app } = own(200);
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  site.state.reservations.clear();
+  await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm");
+  assert.match(await tg(app, rt, `ana@example.com ${PASSWORD}`), /^Booked: Nopa, 19:00\. Confirmation TN-/);
+  assert.equal(site.state.reservations.size, 1);
+  assert.ok(!sent.some((m) => /Reply YES/.test(m.text)), "one text, no question");
+  assert.match(sent.find((m) => m.text.startsWith("Hi, I'm Momo"))!.text, /One text is enough: I do it, then tell you exactly what I did/);
+
+  // Over the limit: the one thing that still waits.
+  await redis.flushdb();
+  sent.length = 0;
+  site.state.reservations.clear();
+  const tight = own(20);
+  await tg(tight.app, tight.rt, "hey");
+  await tg(tight.app, tight.rt, "Ana");
+  await tg(tight.app, tight.rt, "San Francisco");
+  await tg(tight.app, tight.rt, "book a table for 2 at Nopa tonight at 7pm");
+  assert.match(await tg(tight.app, tight.rt, `ana@example.com ${PASSWORD}`), /Book Nopa.*Reply YES/s);
+  assert.equal(site.state.reservations.size, 0);
+  assert.match(await tg(tight.app, tight.rt, "yes"), /^Booked: Nopa/);
+});

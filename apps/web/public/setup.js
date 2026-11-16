@@ -123,8 +123,8 @@ $("check-bot").addEventListener("click", async () => {
 $("where").addEventListener("change", () => {
   $("where-note").textContent = {
     web: "Momo uses websites in a browser window of its own. It starts with a copy of your Chrome or Edge sign-ins and saved passwords, so it's already logged in where you are; your own browser isn't touched.",
-    local: "Momo can also use apps on this computer, like a person at the screen. It asks before sending or deleting anything. Only you can text it.",
-    full: "Momo can use apps, read your files and run commands on this computer, so it can finish errands without asking you at each step. It still asks before deleting, uninstalling or replacing a file, and before it buys, books or sends. Only you can text it.",
+    local: "Momo can also use apps on this computer, like a person at the screen. It does what you text and tells you what it did. Only you can text it.",
+    full: "Momo can use apps, read your files and run commands on this computer, so it finishes errands by itself and tells you what it changed. Only you can text it.",
   }[$("where").value];
 });
 
@@ -186,6 +186,9 @@ async function settings() {
   lines.push(`MOMO_MASTER_KEY=${b64(crypto.getRandomValues(new Uint8Array(32)))}`, "MOMO_SINGLE_OWNER=1");
   if ($("where").value !== "web") lines.push("MOMO_DESKTOP=local");
   if ($("where").value === "full") lines.push("MOMO_ACCESS=full");
+  const limit = $("limit").value.replace(/[^\d.]/g, "");
+  if (!limit) lines.push("MOMO_SPEND_LIMIT=none");
+  else if (Number(limit) !== 200) lines.push(`MOMO_SPEND_LIMIT=${Number(limit)}`);
   if ($("awake").value === "always") lines.push("MOMO_MAINTENANCE=off");
   if ($("awake").value === "off") lines.push("MOMO_AWAKE=off");
   if ($("bland").value.trim()) lines.push(`BLAND_API_KEY=${$("bland").value.trim()}`);

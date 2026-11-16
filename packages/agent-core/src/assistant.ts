@@ -210,7 +210,7 @@ export class Assistant {
         const link = await deps.secureLinks.create({ kind, label: what });
         await deps.pendingForms.update((all) => all.concat({ id: link.id, kind, label: what, taskId: task.id, createdAt: now().getTime() }));
         return kind === "card"
-          ? `To pay, add the card you want me to use. It's encrypted on your phone, I never see the number, and I still ask before every purchase:\n${link.url}`
+          ? `To pay, add the card you want me to use. It's encrypted on your phone and I never see the number:\n${link.url}`
           : `This one gets delivered, so I need an address to put on the order. Add it here (saved for next time):\n${link.url}`;
       },
       recentConversation: () => this.recentConversation(),
@@ -321,7 +321,7 @@ export class Assistant {
     if (/^help$/i.test(text)) {
       await say(
         `I can ${this.d.skills.map((s) => s.description).join("; ")}.\n` +
-          `I always ask before I book or buy. STOP cancels everything in progress. UNDO reverses the last thing I did.`,
+          `I tell you exactly what I did when it's done. STOP cancels everything in progress. UNDO reverses the last thing I did.`,
       );
       return { handled: true };
     }
@@ -452,7 +452,7 @@ export class Assistant {
     }
     const task = form.taskId ? await this.d.tasks.get(form.taskId) : undefined;
     if (!task) {
-      if (form.to) await this.d.outbound.send(form.to.channel, form.to.threadId, form.kind === "card" ? "Saved your card. I'll use it when you ask me to buy something, and I still ask before every purchase." : "Saved your address. Deliveries go there from now on.");
+      if (form.to) await this.d.outbound.send(form.to.channel, form.to.threadId, form.kind === "card" ? "Saved your card. I'll use it when you ask me to buy something." : "Saved your address. Deliveries go there from now on.");
       return;
     }
     await this.d.outbound.send(task.channel, task.threadId, `Saved your ${form.label}${form.kind === "login" ? " login" : ""}. Continuing.`);
@@ -505,7 +505,7 @@ export class Assistant {
       await this.d.owners.setOnboarding("name");
       await say(
         "Hi, I'm Momo. Text me what you need and I'll get it done: bookings, reminders, errands on any website.\n" +
-          "I always ask before I book or buy, and your passwords are encrypted so nobody, including me, reads them in chat.\n\n" +
+          "One text is enough: I do it, then tell you exactly what I did. Your passwords are encrypted so nobody, including me, reads them in chat.\n\n" +
           "What should I call you?",
       );
       return true;
