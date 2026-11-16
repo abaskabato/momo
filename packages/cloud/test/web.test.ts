@@ -308,7 +308,7 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
   await withSite(createRelay(store, { env: OPERATOR_ENV, fetch: tg.fetch }), async (base, browser) => {
     const page = await browser.newPage();
     await page.goto(base);
-    await page.getByText("It takes two minutes").waitFor();
+    await page.getByText("Two minutes: open the file").waitFor();
     assert.ok(await page.isHidden("#s-model"), "no AI step");
     assert.ok(await page.isHidden("#s-bot"), "no bot step");
     assert.ok(await page.isHidden("#where"), "choices are folded away under Settings");
@@ -327,7 +327,7 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     // Someone who wants it awake around the clock (their own visit: each download pairs afresh).
     const other = await browser.newPage();
     await other.goto(base);
-    await other.getByText("It takes two minutes").waitFor();
+    await other.getByText("Two minutes: open the file").waitFor();
     await other.click("#settings > summary");
     await other.selectOption("#awake", "always");
     const [again] = await Promise.all([other.waitForEvent("download"), other.click("#download")]);

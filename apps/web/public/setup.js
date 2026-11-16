@@ -48,7 +48,7 @@ function showProvider() {
   $("key-help").textContent = "";
   if (p.keyUrl) {
     const a = Object.assign(document.createElement("a"), { href: p.keyUrl, target: "_blank", rel: "noopener", textContent: p.id === "gemini" ? "Get a free one from Google" : "Get one here" });
-    $("key-help").append(document.createTextNode("This is the AI that does the thinking. "), a, document.createTextNode(p.id === "gemini" ? ", then paste it. The free tier allows about one errand a day; turn on billing for real use." : ", then paste it."));
+    $("key-help").append(a, document.createTextNode(p.id === "gemini" ? ". Free covers about one errand a day." : "."));
   }
   say($("model-status"), "");
 }

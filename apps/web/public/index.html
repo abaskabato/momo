@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Momo</title>
-<meta name="description" content="Momo is a personal assistant you text. It runs on your own computer, uses websites and apps the way you do, and comes back when the errand is done.">
+<meta name="description" content="Momo is a personal assistant on your own computer. Text it. It gets done.">
 <meta name="theme-color" content="#ffffff">
 <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
@@ -19,18 +19,16 @@
 </header>
 <main class="home">
   <section class="letter" id="s-get">
-    <h1>Momo is a personal assistant that lives on your own computer and gets things done.</h1>
-    <p class="lede">There is nothing to learn: you text it. It uses websites and your computer the way you do, signed in as you, and tells you when it's finished.</p>
-    <p class="lede">It can <u>book a table for Friday</u>, <u>refill a prescription</u>, <u>order the week's groceries</u>, <u>find the cheapest flight home</u>, or <u>clear out your Downloads folder</u>.</p>
-    <p class="lede">It is private by design. Your passwords stay encrypted on your computer, the AI never sees them, and every line of Momo is open to read.</p>
+    <h1>Momo is a personal assistant on your own computer.</h1>
+    <p class="lede">Text it. It gets done.</p>
+    <p class="lede"><u>Book a table</u>, <u>order groceries</u>, <u>refill a prescription</u>.</p>
+    <p class="lede">Private: your passwords stay locked on your computer.</p>
     <div class="steps" id="steps" hidden>
-      <p class="lede">Setting it up takes about two minutes: paste two things, then download.</p>
       <section class="step" id="s-model" hidden>
-        <h2><span class="num">1</span>Paste an AI key</h2>
+        <h2><span class="num">1</span>AI key</h2>
         <p class="note" id="key-help"></p>
         <div id="key-row">
-          <label for="key">AI key</label>
-          <input id="key" autocomplete="off" spellcheck="false">
+          <input id="key" aria-label="AI key" placeholder="Paste it here" autocomplete="off" spellcheck="false">
         </div>
         <p class="note" id="model-status" role="status"></p>
         <details class="options">
@@ -44,10 +42,9 @@
         </details>
       </section>
       <section class="step" id="s-bot" hidden>
-        <h2><span class="num">2</span>Paste a Telegram bot token</h2>
-        <p>This is how you'll text Momo. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, send <b>/newbot</b>, pick any name, and paste the token it gives you.</p>
-        <label for="bot">Bot token</label>
-        <input id="bot" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+        <h2><span class="num">2</span>Telegram bot</h2>
+        <p>Message <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> <b>/newbot</b>. It gives you a token.</p>
+        <input id="bot" aria-label="Telegram bot token" autocomplete="off" spellcheck="false" placeholder="Paste it here">
         <p class="note" id="bot-status" role="status"></p>
       </section>
     </div>
@@ -57,7 +54,7 @@
       <button type="button" data-os="windows" aria-pressed="false">Windows</button>
       <button type="button" data-os="linux" aria-pressed="false">Linux</button>
     </div>
-    <p class="note" id="intro-ready" hidden>It takes two minutes: open the file, then tap the link to start texting.</p>
+    <p class="note" id="intro-ready" hidden>Two minutes: open the file, tap the link, start texting.</p>
     <p class="note" id="get-status" role="status"></p>
     <div id="after" hidden>
       <p class="note" id="os-how"></p>
