@@ -229,17 +229,19 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-pro-latest" }] }) }));
     await page.route("https://api.telegram.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, result: { username: "ana_momo_bot" } }) }));
     await page.goto(base);
-    await page.getByRole("heading", { name: /Text Momo/ }).waitFor();
-    // The page is one sentence and one button; the key and bot live under Settings.
-    assert.ok(await page.isHidden("#key"), "settings are folded away");
-    // Downloading with nothing filled in opens Settings at what's missing.
-    await page.click("#download");
+    await page.getByRole("heading", { name: /Momo is a personal assistant/ }).waitFor();
+    // With nothing pre-filled, the two things to paste are right on the page, as numbered steps.
     await page.waitForSelector("#key", { state: "visible" });
-    assert.ok((await page.textContent("#get-status"))!.length > 0, "and says what is missing");
+    assert.ok(await page.isVisible("#bot"), "the bot step is on the page too");
+    assert.ok(await page.isHidden("#where"), "the choices stay folded under Settings");
+    // Downloading with nothing filled in says what is missing and puts the cursor there.
+    await page.click("#download");
+    await page.getByText("Paste your AI key first.").waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement?.id), "key");
     await page.fill("#key", "AIza-test-key");
     // A model name the key doesn't have is caught here, not after installing.
     assert.ok(await page.isHidden("#model"), "the model box is tucked away until someone wants it");
-    await page.click("text=Choose a specific model");
+    await page.click("text=Use a different AI");
     await page.fill("#model", "gpt");
     await page.click("#check-model");
     await page.getByText('it has no model called "gpt". Try one of: gemini-flash-latest').waitFor();
@@ -248,8 +250,9 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     await page.fill("#model", "gemini-flash-latest");
     await page.click("#check-model");
     await page.getByText("The key works.").waitFor();
+    // Pasting the token is enough: it is checked when the box is left.
     await page.fill("#bot", "123456:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-    await page.click("#check-bot");
+    await page.press("#bot", "Tab");
     await page.getByText("Found your bot: @ana_momo_bot").waitFor();
     await page.click("[data-os=mac]");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
@@ -305,7 +308,7 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
   await withSite(createRelay(store, { env: OPERATOR_ENV, fetch: tg.fetch }), async (base, browser) => {
     const page = await browser.newPage();
     await page.goto(base);
-    await page.getByText("Getting it takes two minutes").waitFor();
+    await page.getByText("It takes two minutes").waitFor();
     assert.ok(await page.isHidden("#s-model"), "no AI step");
     assert.ok(await page.isHidden("#s-bot"), "no bot step");
     assert.ok(await page.isHidden("#where"), "choices are folded away under Settings");
@@ -324,7 +327,7 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     // Someone who wants it awake around the clock (their own visit: each download pairs afresh).
     const other = await browser.newPage();
     await other.goto(base);
-    await other.getByText("Getting it takes two minutes").waitFor();
+    await other.getByText("It takes two minutes").waitFor();
     await other.click("#settings > summary");
     await other.selectOption("#awake", "always");
     const [again] = await Promise.all([other.waitForEvent("download"), other.click("#download")]);

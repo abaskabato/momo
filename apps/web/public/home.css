@@ -1,164 +1,69 @@
-/* Momo's home page. Almost nothing on it: a sentence, an example, one button,
-   and three plain facts about where your things stay. Black and white only;
-   it follows the visitor's light or dark setting. Scoped to body.home. */
+/* Momo's home page: a short letter. White page, one column of serif prose
+   set at reading size, examples underlined, and one action written as words.
+   Everything else (fields, buttons, notes) comes from style.css. */
 
-body.home {
-  color-scheme: light dark;
-  --bg: #fafafa;
-  --fg: #0a0a0a;
-  --mut: #6e6e73;
-  --faint: #a1a1a6;
-  --line: rgba(0, 0, 0, 0.12);
-  --mark: transparent;
-  --ok: #1a7f37;
-  --bad: #c0392b;
-  --serif: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  background: var(--bg);
-  color: var(--fg);
-  -webkit-font-smoothing: antialiased;
-}
-@media (prefers-color-scheme: dark) {
-  body.home {
-    --bg: #000000;
-    --fg: #f5f5f7;
-    --mut: #8e8e93;
-    --faint: #5c5c61;
-    --line: rgba(255, 255, 255, 0.16);
-    --ok: #5fd38a;
-    --bad: #ff8a7a;
-  }
-}
+body.home header.site { padding: 36px 36px 0; }
+body.home header.site .wordmark { font-size: 26px; font-weight: 600; }
+main.home { max-width: 732px; padding: 96px 36px 56px; }
 
-body.home header.site,
-body.home footer.legal,
-main.home {
-  max-width: 880px;
-  margin: 0 auto;
-  padding-left: 28px;
-  padding-right: 28px;
-}
-body.home header.site { align-items: center; padding-top: 28px; }
-body.home header.site .wordmark { font: 500 16px/1 var(--serif); letter-spacing: -0.02em; }
-body.home header.site nav a,
-body.home footer.legal,
-body.home footer.legal a { font: 400 13px/1.4 var(--serif); letter-spacing: 0; color: var(--mut); text-decoration: none; }
-body.home header.site nav a:hover, body.home footer.legal a:hover { color: var(--fg); }
-
-/* ---- One screen: the sentence, an example, the button ---- */
-main.home { padding-top: 0; padding-bottom: 40px; }
-.hero {
-  min-height: calc(100vh - 150px);
-  min-height: calc(100svh - 150px);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 48px 0 56px;
-}
-.hero h1 {
-  font: 500 clamp(44px, 9.2vw, 104px) / 0.98 var(--serif);
-  letter-spacing: -0.055em;
-  margin: 0 0 clamp(28px, 5vh, 44px);
-}
-.hero h1 span { color: var(--faint); }
-
-/* The example: what you text, and what comes back. Two lines, nothing around them. */
-.example {
-  margin: 0 0 clamp(32px, 6vh, 52px);
-  min-height: 3.4em;
-  font: 400 clamp(17px, 2.1vw, 21px) / 1.5 var(--serif);
-  letter-spacing: -0.015em;
-  transition: opacity 0.4s ease;
-}
-.example.out { opacity: 0; }
-.example p { margin: 0; font: inherit; letter-spacing: inherit; }
-.example .ask { color: var(--fg); }
-.example .ask::after {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-left: 3px;
-  vertical-align: -0.16em;
-  background: var(--fg);
-  animation: caret 1.05s steps(1) infinite;
-}
-.example .ask.sent::after { display: none; }
-.example .done { color: var(--mut); opacity: 0; transform: translateY(4px); transition: opacity 0.5s ease, transform 0.5s ease; }
-.example .done.in { opacity: 1; transform: none; }
-@keyframes caret { 50% { opacity: 0; } }
-
-.hero #download {
-  margin: 0;
-  padding: 16px 26px;
-  font: 500 16px/1 var(--serif);
+.letter h1,
+.letter p.lede {
+  font: 400 24px/1.3 var(--serif);
   letter-spacing: -0.01em;
-  color: var(--bg);
-  background: var(--fg);
-  border-radius: 999px;
-  text-decoration: none;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  margin: 0 0 31px;
+  color: var(--fg);
 }
-.hero #download::after { content: ""; }
-.hero #download:hover { opacity: 0.82; }
-.hero #download:active { transform: scale(0.98); }
-.hero #download:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
-.hero #download:disabled { opacity: 0.5; }
-.hero p.note { margin: 18px 0 0; max-width: 34em; font: 400 14px/1.5 var(--serif); letter-spacing: 0; color: var(--mut); }
-.hero p.note a { color: var(--fg); text-decoration-color: var(--line); }
-.hero p.lede.small { margin: 14px 0 0; max-width: 34em; font: 400 16px/1.5 var(--serif); letter-spacing: -0.005em; color: var(--fg); }
-.hero p.lede.small b { font-family: var(--mono); font-weight: 500; }
-.hero p.lede a { text-decoration-color: var(--line); }
-
-/* ---- Private: three plain facts ---- */
-.private {
-  list-style: none;
-  margin: 0;
-  padding: 28px 0 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 28px;
-  border-top: 1px solid var(--line);
+.letter h1 { font-weight: 500; }
+/* Things you might text it: underlined, like a pencil mark under each. */
+.letter u {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+  text-decoration-color: var(--line);
 }
-.private li { font: 400 14px/1.5 var(--serif); letter-spacing: 0; color: var(--mut); }
-.private li b { display: block; margin-bottom: 4px; font-weight: 500; font-size: 15px; letter-spacing: -0.01em; color: var(--fg); }
-.private li a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--line); }
+.letter #download { margin: 6px 0 0; font-weight: 600; }
+/* Which computer: three quiet words under the action. */
+.letter .tabs { margin-top: 12px; }
+.letter .tabs button { font-size: 15px; }
 
-/* ---- Settings, folded away ---- */
-details.settings { margin-top: 56px; max-width: 640px; }
+/* The steps, when there is something to paste. */
+.steps { margin: 17px 0 0; }
+.steps > p.lede { margin-bottom: 0; }
+.steps section.step { margin-top: 36px; }
+.steps + #download { margin-top: 30px; }
+.steps details.options { margin-top: 10px; }
+.steps details.options summary { font: 400 13px/1.4 var(--sans); }
+.letter p.note { max-width: 34em; margin-top: 16px; }
+.letter #after { margin-top: 28px; }
+.letter p.lede.small { font-size: 20px; margin: 0 0 14px; }
+.letter p.lede.small b { font-weight: 600; }
+
+details.settings { margin-top: 72px; }
 details.settings > summary {
   cursor: pointer;
   width: max-content;
-  font: 400 13px/1.4 var(--serif);
-  color: var(--mut);
+  font: 400 13px/1.4 var(--sans);
+  letter-spacing: -0.01em;
+  color: var(--fg);
   list-style: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line);
 }
 details.settings > summary::-webkit-details-marker { display: none; }
-details.settings > summary::after { content: " +"; }
-details.settings[open] > summary::after { content: " –"; }
-details.settings > summary:hover { color: var(--fg); }
 details.settings section.step { margin-top: 40px; }
-body.home section.step h2 { font: 500 18px/1.3 var(--serif); letter-spacing: -0.015em; }
-body.home section.step p, body.home p.note { letter-spacing: 0; }
-body.home label { font: 400 13px/1.4 var(--serif); }
-body.home input, body.home select { font: 400 17px/1.3 var(--serif); letter-spacing: -0.005em; }
-body.home input::placeholder { color: var(--faint); }
-body.home button.quiet, body.home .tabs button { font: 400 15px/1.3 var(--serif); text-decoration-color: var(--line); }
-body.home .tabs button[aria-pressed=true] { background: none; text-decoration-color: var(--fg); }
-@media (prefers-color-scheme: dark) {
-  body.home select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23f5f5f7' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  }
-  body.home select option { background: #111; color: var(--fg); }
-}
-body.home footer.legal { padding-top: 40px; padding-bottom: 32px; }
+details.settings section.step h2 { font-size: 22px; }
 
-@media (max-width: 640px) {
-  .private { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .hero { min-height: 0; padding-top: 56px; }
+body.home footer.legal { padding: 48px 36px 36px; color: var(--fg); }
+body.home footer.legal a { color: var(--fg); }
+
+@media (max-width: 560px) {
+  body.home header.site { padding: 24px 20px 0; }
+  main.home { padding: 56px 20px 40px; }
+  body.home footer.legal { padding: 40px 20px 28px; }
+  .letter h1, .letter p.lede { font-size: 21px; margin-bottom: 26px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .example .ask::after { animation: none; }
-  .example .done { transition: none; }
-}
+
+/* The line that says a key was checked keeps its place, so nothing jumps when it appears. */
+.steps #model-status:empty, .steps #bot-status:empty { display: block; }
+.steps #model-status, .steps #bot-status { min-height: 1.5em; margin: 8px 0 0; }

@@ -30,8 +30,10 @@ const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.
   // Phone calls come with the site: no key to paste.
   $("calls-own").hidden = !!config.calls;
   $("calls-included").hidden = !config.calls;
-  $("intro-ready").hidden = !(config.model && (config.bot || config.imessage));
-  $("intro-manual").hidden = !!(config.model && (config.bot || config.imessage));
+  // Nothing to paste: the page is the letter and one button. Otherwise the steps show, numbered.
+  const nothing = !!(config.model && (config.bot || config.imessage));
+  $("intro-ready").hidden = !nothing;
+  $("steps").hidden = nothing;
 });
 
 // --- Step: the AI ---------------------------------------------------------
@@ -45,8 +47,8 @@ function showProvider() {
   $("model").placeholder = p.model || "the model's name, from the provider's docs";
   $("key-help").textContent = "";
   if (p.keyUrl) {
-    const a = Object.assign(document.createElement("a"), { href: p.keyUrl, target: "_blank", rel: "noopener", textContent: "Get a key here" });
-    $("key-help").append(a, document.createTextNode(p.id === "gemini" ? ". The free tier allows about one errand a day; turn on billing for real use." : "."));
+    const a = Object.assign(document.createElement("a"), { href: p.keyUrl, target: "_blank", rel: "noopener", textContent: p.id === "gemini" ? "Get a free one from Google" : "Get one here" });
+    $("key-help").append(document.createTextNode("This is the AI that does the thinking. "), a, document.createTextNode(p.id === "gemini" ? ", then paste it. The free tier allows about one errand a day; turn on billing for real use." : ", then paste it."));
   }
   say($("model-status"), "");
 }
@@ -83,7 +85,7 @@ async function modelIds(r) {
   } catch { return []; }
 }
 
-$("check-model").addEventListener("click", async () => {
+async function checkModel() {
   const p = current();
   if (!p.check) return say($("model-status"), "Nothing to check for this one.");
   const key = $("key").value.trim();
@@ -103,11 +105,14 @@ $("check-model").addEventListener("click", async () => {
   if (ids.length && !ids.includes(model)) $("model").closest("details").open = true;
   if (ids.length && !ids.includes(model)) return say($("model-status"), `The key works, but it has no model called "${model}". Try one of: ${ids.slice(0, 6).join(", ")}`, "bad");
   say($("model-status"), "The key works.", "ok");
-});
+}
+$("check-model").addEventListener("click", checkModel);
+// Pasting is enough: the key is checked as soon as it's in the box.
+$("key").addEventListener("change", checkModel);
 
 // --- Step: the bot --------------------------------------------------------
 let botName = "";
-$("check-bot").addEventListener("click", async () => {
+$("bot").addEventListener("change", async () => {
   const t = $("bot").value.trim();
   if (!BOT_TOKEN.test(t)) return say($("bot-status"), "That doesn't look like a bot token (numbers, a colon, then letters).", "bad");
   const el = $("bot-status");
@@ -258,10 +263,10 @@ $("download").addEventListener("click", async () => {
     }
   } catch (e) {
     say(st, e.message, "bad");
-    // What's missing is filled in under Settings: open it, at the part that needs attention.
+    // Point at the step that needs attention.
     if (!config.model || !(config.bot || config.imessage)) {
-      $("settings").open = true;
-      (/bot/i.test(e.message) ? $("bot") : /model/i.test(e.message) ? $("model") : $("key")).scrollIntoView({ block: "center", behavior: "smooth" });
+      if (/model/i.test(e.message)) $("model").closest("details").open = true;
+      (/bot/i.test(e.message) ? $("bot") : /model/i.test(e.message) ? $("model") : $("key")).focus();
     }
   } finally {
     $("download").disabled = false;

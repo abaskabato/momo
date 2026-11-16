@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Momo</title>
 <meta name="description" content="Momo is a personal assistant you text. It runs on your own computer, uses websites and apps the way you do, and comes back when the errand is done.">
-<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff">
 <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/home.css">
@@ -15,19 +14,50 @@
 </head>
 <body class="home">
 <header class="site">
-  <a href="/" class="wordmark">momo</a>
+  <a href="/" class="wordmark">Momo</a>
   <nav><a href="https://github.com/abaskabato/momo" rel="noopener">Source</a></nav>
 </header>
 <main class="home">
-  <section class="hero" id="s-get">
-    <h1>Text Momo.<br><span>It gets done.</span></h1>
-    <div class="example" id="demo" aria-label="An example">
-      <p class="ask sent">Table for 2 at Nopa, Friday at 7</p>
-      <p class="done in">Booked. Friday 7:15pm, under your name.</p>
+  <section class="letter" id="s-get">
+    <h1>Momo is a personal assistant that lives on your own computer and gets things done.</h1>
+    <p class="lede">There is nothing to learn: you text it. It uses websites and your computer the way you do, signed in as you, and tells you when it's finished.</p>
+    <p class="lede">It can <u>book a table for Friday</u>, <u>refill a prescription</u>, <u>order the week's groceries</u>, <u>find the cheapest flight home</u>, or <u>clear out your Downloads folder</u>.</p>
+    <p class="lede">It is private by design. Your passwords stay encrypted on your computer, the AI never sees them, and every line of Momo is open to read.</p>
+    <div class="steps" id="steps" hidden>
+      <p class="lede">Setting it up takes about two minutes: paste two things, then download.</p>
+      <section class="step" id="s-model" hidden>
+        <h2><span class="num">1</span>Paste an AI key</h2>
+        <p class="note" id="key-help"></p>
+        <div id="key-row">
+          <label for="key">AI key</label>
+          <input id="key" autocomplete="off" spellcheck="false">
+        </div>
+        <p class="note" id="model-status" role="status"></p>
+        <details class="options">
+          <summary>Use a different AI</summary>
+          <label for="provider">AI provider</label>
+          <select id="provider"></select>
+          <label for="model">Model</label>
+          <input id="model" list="models" autocomplete="off" spellcheck="false">
+          <datalist id="models"></datalist>
+          <button id="check-model" class="quiet" type="button">Check the key</button>
+        </details>
+      </section>
+      <section class="step" id="s-bot" hidden>
+        <h2><span class="num">2</span>Paste a Telegram bot token</h2>
+        <p>This is how you'll text Momo. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, send <b>/newbot</b>, pick any name, and paste the token it gives you.</p>
+        <label for="bot">Bot token</label>
+        <input id="bot" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
+        <p class="note" id="bot-status" role="status"></p>
+      </section>
     </div>
     <button id="download" type="button">Download Momo</button>
-    <p class="note" id="intro-ready" hidden>Getting it takes two minutes: open the file, then tap the link to start texting.</p>
-    <p class="note" id="intro-manual" hidden>Momo runs on your own AI key and Telegram bot. Add them once under <a href="#settings" id="open-settings">Settings</a>, then download.</p>
+    <div class="tabs" role="group" aria-label="Your computer">
+      <button type="button" data-os="mac" aria-pressed="false">Mac</button>
+      <button type="button" data-os="windows" aria-pressed="false">Windows</button>
+      <button type="button" data-os="linux" aria-pressed="false">Linux</button>
+    </div>
+    <p class="note" id="intro-ready" hidden>It takes two minutes: open the file, then tap the link to start texting.</p>
     <p class="note" id="get-status" role="status"></p>
     <div id="after" hidden>
       <p class="note" id="os-how"></p>
@@ -36,42 +66,9 @@
     </div>
   </section>
 
-  <ul class="private" aria-label="Private">
-    <li><b>Runs on your computer</b>Not in a cloud. Your errands happen on your own machine, signed in as you.</li>
-    <li><b>Passwords stay locked</b>Encrypted on your computer. The AI never sees them.</li>
-    <li><b>Open source</b>Nothing hidden. <a href="https://github.com/abaskabato/momo" rel="noopener">Read every line.</a></li>
-  </ul>
 
   <details class="settings" id="settings">
     <summary>Settings</summary>
-
-    <section class="step" id="s-model" hidden>
-      <h2>The AI that drives Momo</h2>
-      <label for="provider">AI provider</label>
-      <select id="provider"></select>
-      <p class="note" id="key-help"></p>
-      <div id="key-row">
-        <label for="key">API key</label>
-        <input id="key" autocomplete="off" spellcheck="false">
-      </div>
-      <details class="options">
-        <summary>Choose a specific model</summary>
-        <label for="model">Model</label>
-        <input id="model" list="models" autocomplete="off" spellcheck="false">
-        <datalist id="models"></datalist>
-      </details>
-      <button id="check-model" class="quiet" type="button">Check the key</button>
-      <p class="note" id="model-status" role="status"></p>
-    </section>
-
-    <section class="step" id="s-bot" hidden>
-      <h2>Your Telegram bot</h2>
-      <p>In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a>, send <b>/newbot</b>, pick any name, and paste the token it gives you here.</p>
-      <label for="bot">Bot token</label>
-      <input id="bot" autocomplete="off" spellcheck="false" placeholder="123456789:AA…">
-      <button id="check-bot" class="quiet" type="button">Check the bot</button>
-      <p class="note" id="bot-status" role="status"></p>
-    </section>
 
     <section class="step" id="s-where">
       <h2>What Momo can use</h2>
@@ -102,11 +99,6 @@
         <option value="off">sleeps whenever it usually does</option>
       </select>
       <p class="note" id="awake-note"></p>
-      <div class="tabs" role="group" aria-label="Your computer">
-        <button type="button" data-os="mac" aria-pressed="false">Mac</button>
-        <button type="button" data-os="windows" aria-pressed="false">Windows</button>
-        <button type="button" data-os="linux" aria-pressed="false">Linux</button>
-      </div>
     </section>
   </details>
 </main>
