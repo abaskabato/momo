@@ -51,6 +51,9 @@ to update; your saved logins and settings are kept. Logs are in
      through the site; the key never leaves the server. Use a paid key: a free
      tier runs out after one errand.
    - `TELEGRAM_BOT_TOKEN` for one shared bot (make it once with @BotFather).
+   - `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY` and `SENDBLUE_NUMBER` for one shared iMessage line
+     (a paid line from sendblue.com; no Mac needed). People text the line from Messages; the
+     site registers its webhook by itself. Works beside the Telegram bot or instead of it.
      The site points its webhook at itself and routes each chat to the Momo
      that paired with it. Set `MOMO_PUBLIC_URL` to the site's https address.
 4. Deploy. The site's home page is the download page.

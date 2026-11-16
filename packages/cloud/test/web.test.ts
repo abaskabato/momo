@@ -342,3 +342,66 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
 function parseEnvText(t: string): Record<string, string> {
   return Object.fromEntries(t.split("\n").flatMap((l) => (/^([A-Z0-9_]+)=(.*)$/.exec(l) ? [[RegExp.$1, RegExp.$2]] : [])));
 }
+
+test("relay: a shared iMessage line: text the code to pair, texts reach that person's Momo, answers go back by iMessage; one owner across Telegram and iMessage", async () => {
+  const tg = fakeTelegram();
+  const line: Array<{ url: string; keyId: string | undefined; body: Record<string, unknown> }> = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    if (u.startsWith("https://api.sendblue.com/")) {
+      line.push({ url: u, keyId: (init?.headers as Record<string, string>)["sb-api-key-id"], body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ status: "QUEUED" }), { headers: { "content-type": "application/json" } });
+    }
+    return tg.fetch(url, init);
+  }) as typeof fetch;
+  const store = memoryStore();
+  const env = { ...OPERATOR_ENV, SENDBLUE_API_KEY_ID: "sb-id", SENDBLUE_API_SECRET_KEY: "sb-SECRETKEY", SENDBLUE_NUMBER: "+15122164639" };
+  const relay = createRelay(store, { env, fetch: f });
+
+  // The setup page learns the line's number; the relay points the line's webhook at itself, once.
+  assert.deepEqual(await (await call(relay, "/api/config")).json(), { model: { name: "gemini-test" }, bot: "momo_shared_bot", imessage: "+15122164639" });
+  await call(relay, "/api/config");
+  const hooks = line.filter((c) => c.url.endsWith("/api/account/webhooks"));
+  assert.equal(hooks.length, 1);
+  const hookUrl = (hooks[0]!.body.webhooks as string[])[0]!;
+  assert.match(hookUrl, /^https:\/\/momo-web\.example\/api\/imessage\/[\w-]{40}$/);
+  assert.equal(hooks[0]!.keyId, "sb-id");
+  const { token, pair } = (await (await call(relay, "/api/devices", { method: "POST" })).json()) as { token: string; pair: string };
+
+  const text = (content: string, from = "+13605550142", extra: Record<string, unknown> = {}, path = new URL(hookUrl).pathname) =>
+    relay(new Request(`${BASE}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content, from_number: from, to_number: "+15122164639", is_outbound: false, status: "RECEIVED", group_id: "", message_handle: `h-${Math.random()}`, date_sent: "2026-11-15T20:00:00Z", service: "iMessage", ...extra }) }));
+  const inbox = async () => ((await (await call(relay, "/api/inbox", { token })).json()) as { messages: Array<{ from: string; text: string }> }).messages.map((m) => [m.from, m.text]);
+
+  // Only the line's own webhook address works.
+  assert.equal((await text("hi", "+13605550142", {}, "/api/imessage/wrong")).status, 404);
+  // A stranger is pointed at the site; nothing is queued.
+  await text("hi", "+19998887777");
+  assert.deepEqual(line.at(-1)!.body, { number: "+19998887777", content: "This is Momo. To get your own, open https://momo-web.example and follow the steps; it takes a few minutes.", from_number: "+15122164639" });
+  assert.deepEqual(await inbox(), []);
+
+  // The person texts the code from the setup page: that sender is theirs from then on. An Apple ID email works as a sender too.
+  await text(pair);
+  await text("book a table for two", "+13605550142", { message_handle: "dup" });
+  await text("book a table for two", "+13605550142", { message_handle: "dup" }); // the line retried
+  await text("our own echo", "+13605550142", { is_outbound: true });
+  await text("from a group", "+13605550142", { group_id: "g1" });
+  assert.deepEqual(await inbox(), [["im:+13605550142", "hi"], ["im:+13605550142", "book a table for two"]]);
+
+  // The answer goes back over iMessage, from the line.
+  const before = line.length;
+  assert.equal((await call(relay, "/api/send", { method: "POST", token, body: JSON.stringify({ text: "On it." }) })).status, 200);
+  assert.equal(line.length, before + 1);
+  assert.equal(line.at(-1)!.url, "https://api.sendblue.com/api/send-message");
+  assert.deepEqual(line.at(-1)!.body, { number: "+13605550142", content: "On it.", from_number: "+15122164639" });
+
+  // The same person also taps the Telegram link: their Momo sees one owner, and answers wherever they last texted.
+  const hook = (update: unknown) => relay(new Request(`${BASE}/api/telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": tg.state.secret }, body: JSON.stringify(update) }));
+  await hook({ update_id: 2, message: { text: `/start ${pair}`, date: 2, chat: { id: 42, type: "private" } } });
+  assert.deepEqual(await inbox(), [["im:+13605550142", "hi"]]);
+  await call(relay, "/api/send", { method: "POST", token, body: JSON.stringify({ text: "Hello on Telegram." }) });
+  assert.deepEqual(tg.sent.at(-1), { chat_id: "42", text: "Hello on Telegram." });
+  await text("and back on iMessage");
+  await call(relay, "/api/send", { method: "POST", token, body: JSON.stringify({ text: "Back here." }) });
+  assert.equal(line.at(-1)!.body.content, "Back here.");
+  for (const v of store.dump()) assert.ok(!v.includes("sb-SECRETKEY"), "the line's key never lands in storage");
+});

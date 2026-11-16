@@ -146,11 +146,11 @@ if ($Awake -ne "off" -and $Window -match '^\s*\d{1,2}(:\d{2})?\s*-\s*(\d{1,2})(:
 
 # 5. Wait for it to say hello
 for ($i = 0; $i -lt 60; $i++) {
-  if (Select-String -Path $Log -Pattern "Telegram: text|Error" -Quiet) { break }
+  if (Select-String -Path $Log -Pattern "Telegram: |iMessage: |Error" -Quiet) { break }
   Start-Sleep -Seconds 1
 }
 Write-Host ""
-$hello = Select-String -Path $Log -Pattern "Telegram: text" | Select-Object -Last 1
+$hello = Select-String -Path $Log -Pattern "Telegram: |iMessage: " | Select-Object -Last 1
 if ($hello) {
   Say "Momo is running."
   Write-Host $hello.Line.Trim()

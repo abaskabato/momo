@@ -169,12 +169,12 @@ export class RelayTelegramAdapter implements ChannelAdapter {
     if (!r.ok) throw new Error(`relay send: ${r.status} ${((await r.json().catch(() => ({}))) as { error?: string }).error ?? ""}`.trim());
   }
 
-  /** The shared bot's username, from the relay. */
-  async me(): Promise<{ username: string }> {
+  /** The shared bot's username and the shared iMessage line's number (either may be missing), from the relay. */
+  async me(): Promise<{ username: string; imessage?: string }> {
     const r = await this.api("/api/config");
-    const c = (await r.json()) as { bot: string | null; botError?: string };
-    if (!c.bot) throw new Error(c.botError ? `relay: ${c.botError}` : "the website has no shared Telegram bot");
-    return { username: c.bot };
+    const c = (await r.json()) as { bot: string | null; botError?: string; imessage?: string | null; imessageError?: string };
+    if (!c.bot && !c.imessage) throw new Error(c.botError || c.imessageError ? `relay: ${c.botError ?? c.imessageError}` : "the website has no shared Telegram bot or iMessage line");
+    return { username: c.bot ?? "", imessage: c.imessage ?? undefined };
   }
 
   async poll(onMessage: (m: Inbound) => Promise<unknown>, signal: AbortSignal, onError?: (e: Error) => void): Promise<void> {

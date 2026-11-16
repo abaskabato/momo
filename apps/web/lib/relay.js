@@ -8,6 +8,9 @@
 //     a CAPTCHA in the errand's browser
 //   - one shared Telegram bot (TELEGRAM_BOT_TOKEN on the server): people tap a
 //     link instead of making their own bot; messages are queued per device
+//   - one shared iMessage line (SENDBLUE_API_KEY_ID, SENDBLUE_API_SECRET_KEY and
+//     SENDBLUE_NUMBER on the server): people text the line from Messages; no Mac
+//     anywhere. Works beside the Telegram bot or instead of it
 //   - one shared model key (MOMO_MODEL + that provider's key on the server):
 //     devices call the model through here and never hold the key
 //
@@ -149,6 +152,10 @@ export function operatorConfig(env) {
   return {
     model: provider && key ? { name: spec.slice(slash + 1), baseUrl: env.MOMO_MODEL_BASE_URL || provider.baseUrl, key } : null,
     botToken: env.TELEGRAM_BOT_TOKEN || null,
+    // An iMessage line from Sendblue: its two API keys and the line's number (what people text).
+    imessage: env.SENDBLUE_API_KEY_ID && env.SENDBLUE_API_SECRET_KEY && env.SENDBLUE_NUMBER
+      ? { keyId: env.SENDBLUE_API_KEY_ID, secret: env.SENDBLUE_API_SECRET_KEY, number: env.SENDBLUE_NUMBER.trim() }
+      : null,
     publicUrl: env.MOMO_PUBLIC_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null),
   };
 }
@@ -176,6 +183,11 @@ export function operatorConfig(env) {
  *   POST /api/telegram               Telegram's webhook; "/start <pair>" links a chat to a device
  *   GET  /api/inbox                  their Momo (Bearer): messages for it since last time
  *   POST /api/send                   their Momo (Bearer): {text} to its own chat
+ *
+ * Shared iMessage line (SENDBLUE_* on the server):
+ *   POST /api/imessage/<secret>      the line's webhook; texting the pairing code links a sender to a device
+ *   (their Momo reads /api/inbox and answers with /api/send, exactly as with the bot; the answer
+ *    goes wherever the person last texted from)
  *
  * Shared model key (MOMO_MODEL + key on the server):
  *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
@@ -207,6 +219,45 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     return info;
   }
 
+  // --- Shared iMessage line (Sendblue) ---------------------------------------
+  const sb = (path, body, method = "POST") =>
+    f(`${env.SENDBLUE_API_BASE || "https://api.sendblue.com"}/api/${path}`, {
+      method,
+      headers: { "content-type": "application/json", "sb-api-key-id": op.imessage.keyId, "sb-api-secret-key": op.imessage.secret },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  // The webhook's address carries its own secret: only Sendblue is ever told it.
+  let imSecretMemo;
+  const imSecret = async () => (imSecretMemo ??= (await sha256(`momo-imessage-webhook:${op.imessage.secret}`)).slice(0, 40));
+  const imSend = (number, content) => sb("send-message", { number, content, from_number: op.imessage.number });
+
+  /** The line's number, with its webhook pointed here (registered once per address). */
+  async function line(origin) {
+    if (!op.imessage) return null;
+    const hook = `${op.publicUrl || origin}/api/imessage/${await imSecret()}`;
+    const key = `im:hook:${await sha256(hook)}`;
+    if (!(await store.get(key))) {
+      const r = await sb("account/webhooks", { webhooks: [hook], type: "receive" });
+      if (!r.ok) throw new Error(`imessage webhook: ${r.status}`);
+      await store.set(key, "1");
+    }
+    return op.imessage.number;
+  }
+
+  /**
+   * One person, however they text: their Momo sees the same sender whether a message came by Telegram
+   * or iMessage (the first chat it ever heard from), so it is one owner with one memory.
+   */
+  async function arrive(dev, chat, message) {
+    let who = await store.get(`devowner:${dev}`);
+    if (!who) {
+      who = (await store.get(`devchat:${dev}`)) ?? chat;
+      await store.set(`devowner:${dev}`, who);
+    }
+    await store.set(`devchat:${dev}`, chat); // answers go wherever they last texted from
+    await store.rpush(`inbox:${dev}`, JSON.stringify({ ...message, from: who }), INBOX_TTL_S);
+  }
+
   return async function handle(req) {
     const url = new URL(req.url);
     const path = (url.searchParams.get("p") ?? url.pathname.replace(/^\/(api\/)?/, "")).replace(/^\/|\/$/g, "");
@@ -233,7 +284,14 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       } catch (e) {
         return json({ model: op.model ? { name: op.model.name } : null, bot: null, botError: e.message });
       }
-      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null });
+      let im = null;
+      let imError;
+      try {
+        im = await line(url.origin);
+      } catch (e) {
+        imError = e.message;
+      }
+      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null, ...(op.imessage ? { imessage: im, ...(imError ? { imessageError: imError } : {}) } : {}) });
     }
 
     if (path === "devices" && m === "POST") {
@@ -243,7 +301,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       const dev = await sha256(token);
       await store.set(`dev:${dev}`, "1");
       let pair = null;
-      if (op.botToken) {
+      if (op.botToken || op.imessage) {
         pair = randomToken(9);
         await store.set(`pair:${pair}`, dev, PAIR_TTL_S);
       }
@@ -264,17 +322,43 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
         const dev = await store.get(`pair:${start[1]}`);
         if (dev) {
           await store.set(`chat:${chat}`, dev);
-          await store.set(`devchat:${dev}`, chat);
           text = "hi";
         }
       }
       const dev = await store.get(`chat:${chat}`);
+
       if (!dev) {
         const origin = op.publicUrl || url.origin;
         await tg("sendMessage", { chat_id: chat, text: `This is Momo. To get your own, open ${origin} and follow the steps; it takes a few minutes.` });
         return json({ ok: true });
       }
-      await store.rpush(`inbox:${dev}`, JSON.stringify({ id: `tg:${u.update_id}`, from: chat, text: text.slice(0, MAX_TEXT), at: (msg.date ?? Date.now() / 1000) * 1000 }), INBOX_TTL_S);
+      await arrive(dev, chat, { id: `tg:${u.update_id}`, text: text.slice(0, MAX_TEXT), at: (msg.date ?? Date.now() / 1000) * 1000 });
+      return json({ ok: true });
+    }
+
+    if (parts[0] === "imessage" && m === "POST") {
+      if (!op.imessage || parts[1] !== (await imSecret())) return json({ error: "not found" }, 404);
+      const u = await body();
+      // Only texts from one person to the line: not our own messages echoed back, not group chats.
+      const from = typeof u.from_number === "string" ? u.from_number.trim() : "";
+      if (u.is_outbound || u.group_id || !from || typeof u.content !== "string" || !u.content.trim()) return json({ ok: true });
+      // Sendblue retries a webhook it thinks failed: the same message is taken once.
+      if (u.message_handle && (await store.incr(`im:seen:${u.message_handle}`, 24 * 3600)) > 1) return json({ ok: true });
+      const chat = `im:${from}`;
+      let text = u.content.trim();
+      // Pairing: the person texts the code from the setup page (the page's link fills it in for them).
+      const code = /^(?:\/?start\s+)?([\w-]{10,16})$/i.exec(text)?.[1];
+      const paired = code && (await store.get(`pair:${code}`));
+      if (paired) {
+        await store.set(`chat:${chat}`, paired);
+        text = "hi";
+      }
+      const dev = await store.get(`chat:${chat}`);
+      if (!dev) {
+        if (!(await limited(`rl:im:${from}`, 3))) await imSend(from, `This is Momo. To get your own, open ${op.publicUrl || url.origin} and follow the steps; it takes a few minutes.`);
+        return json({ ok: true });
+      }
+      await arrive(dev, chat, { id: `im:${u.message_handle || randomToken(9)}`, text: text.slice(0, MAX_TEXT), at: Date.parse(u.date_sent) || Date.now() });
       return json({ ok: true });
     }
 
@@ -288,12 +372,17 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     if (path === "send" && m === "POST") {
       const dev = await device();
       if (!dev) return json({ error: "unauthorized" }, 401);
-      if (!op.botToken) return json({ error: "no shared bot" }, 404);
+      if (!op.botToken && !op.imessage) return json({ error: "no shared bot" }, 404);
       if (await limited(`rl:send:${dev}`, sendsPerHour)) return json({ error: "too many" }, 429);
       const { text } = await body();
       const chat = await store.get(`devchat:${dev}`);
       if (!chat) return json({ error: "not paired" }, 409);
       if (typeof text !== "string" || !text || text.length > MAX_TEXT) return json({ error: "bad request" }, 400);
+      if (chat.startsWith("im:")) {
+        if (!op.imessage) return json({ error: "no shared line" }, 404);
+        const sent = await imSend(chat.slice(3), text);
+        return sent.ok ? json({ ok: true }) : json({ error: `imessage error ${sent.status}` }, 502);
+      }
       const r = await tg("sendMessage", { chat_id: chat, text, disable_web_page_preview: true });
       return r.ok ? json({ ok: true }) : json({ error: r.description ?? "telegram error" }, 502);
     }

@@ -170,7 +170,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
         const me = await telegram.me();
         void telegram.poll((m) => runtime.accept(m), stop.signal, (e) => console.error(`telegram: ${e.message}`));
         const link = env.MOMO_PAIR_CODE ? `https://t.me/${me.username}?start=${env.MOMO_PAIR_CODE}` : `https://t.me/${me.username}`;
-        notes.push(`Telegram: tap ${link} (shared bot via ${relay!.url})`);
+        if (me.username) notes.push(`Telegram: tap ${link} (shared bot via ${relay!.url})`);
+        if (me.imessage) notes.push(`iMessage: text ${env.MOMO_PAIR_CODE ? `the code ${env.MOMO_PAIR_CODE} to ` : ""}${me.imessage} from Messages (shared line via ${relay!.url})`);
       } else if (telegram) {
         const me = await telegram.me();
         const mode = env.TELEGRAM_MODE || (isPublic ? "webhook" : "polling");

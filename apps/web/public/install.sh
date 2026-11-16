@@ -173,14 +173,14 @@ fi
 # 5. Wait for it to say hello
 i=0
 while [ $i -lt 60 ]; do
-  if grep -q "Telegram: text" "$LOG" 2>/dev/null; then break; fi
+  if grep -qE "Telegram: |iMessage: " "$LOG" 2>/dev/null; then break; fi
   if grep -qiE "^Error|error:|Unauthorized" "$LOG" 2>/dev/null; then break; fi
   i=$((i + 1)); sleep 1
 done
 echo
-if grep -q "Telegram: text" "$LOG"; then
+if grep -qE "Telegram: |iMessage: " "$LOG"; then
   say "Momo is running."
-  grep "Telegram: text" "$LOG" | tail -n1 | sed 's/^ *//'
+  grep -E "Telegram: |iMessage: " "$LOG" | tail -n1 | sed 's/^ *//'
   if grep -q '^MOMO_AWAKE=off' "$DIR/momo.env"; then echo "Say hi to your bot. Leave this computer on: Momo works while it's awake."
   else echo "Say hi to your bot. Momo keeps this computer awake so it can always answer: don't shut it down, and leave a laptop's lid open."; fi
 else

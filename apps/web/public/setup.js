@@ -26,9 +26,9 @@ const BOT_TOKEN = /^\d+:[\w-]{30,}$/;
 let config = { model: null, bot: null };
 const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.json() : config)).then((c) => (config = c)).catch(() => config).finally(() => {
   $("s-model").hidden = !!config.model;
-  $("s-bot").hidden = !!config.bot;
-  $("intro-ready").hidden = !(config.model && config.bot);
-  $("intro-manual").hidden = !!(config.model && config.bot);
+  $("s-bot").hidden = !!(config.bot || config.imessage);
+  $("intro-ready").hidden = !(config.model && (config.bot || config.imessage));
+  $("intro-manual").hidden = !!(config.model && (config.bot || config.imessage));
 });
 
 // --- Step: the AI ---------------------------------------------------------
@@ -172,7 +172,7 @@ async function settings() {
     lines.push(`MOMO_MODEL=${p.id}/${model}`);
     if (p.keyEnv) lines.push(`${p.keyEnv}=${key}`);
   }
-  if (config.bot) {
+  if (config.bot || config.imessage) {
     if (!relay?.pair) throw new Error("This site isn't answering right now. Try again in a minute.");
     lines.push(`MOMO_PAIR_CODE=${relay.pair}`);
   } else {
@@ -231,9 +231,20 @@ $("download").addEventListener("click", async () => {
     $("after").hidden = false;
     $("os-how").textContent = OS[os].how;
     const link = $("bot-link");
+    // iMessage: the link opens Messages with the pairing code already written; on a computer, the code is shown to type.
+    const im = $("im-how");
+    im.hidden = !config.imessage;
+    if (config.imessage) {
+      $("im-link").textContent = config.imessage;
+      $("im-link").href = `sms:${config.imessage}&body=${encodeURIComponent(relay.pair)}`;
+      $("im-code").textContent = relay.pair;
+    }
+    $("tg-how").hidden = !!config.imessage && !config.bot;
     if (config.bot) {
       link.textContent = `t.me/${config.bot}`;
       link.href = `https://t.me/${config.bot}?start=${relay.pair}`;
+    } else if (config.imessage) {
+      link.href = "#";
     } else {
       link.textContent = botName ? `t.me/${botName}` : "your bot";
       link.href = botName ? `https://t.me/${botName}` : "#";
@@ -241,7 +252,7 @@ $("download").addEventListener("click", async () => {
   } catch (e) {
     say(st, e.message, "bad");
     // What's missing is filled in under Settings: open it, at the part that needs attention.
-    if (!config.model || !config.bot) {
+    if (!config.model || !(config.bot || config.imessage)) {
       $("settings").open = true;
       (/bot/i.test(e.message) ? $("bot") : /model/i.test(e.message) ? $("model") : $("key")).scrollIntoView({ block: "center", behavior: "smooth" });
     }
