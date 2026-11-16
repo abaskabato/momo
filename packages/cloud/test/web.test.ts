@@ -471,3 +471,47 @@ test("iMessage for free: a Mac passes texts from Messages to the relay and sends
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("relay: phone calls on the operator's key: a person's Momo places a call and hears how it went, without ever holding the key", async () => {
+  const { BlandVoice } = await import("../src/hosted/phone.ts");
+  const placed: Array<{ auth: string | null; body: Record<string, unknown> }> = [];
+  const f = (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = String(url);
+    const auth = (init?.headers as Record<string, string> | undefined)?.authorization ?? null;
+    if (u === "https://api.bland.ai/v1/calls") {
+      placed.push({ auth, body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify({ status: "success", call_id: "call-0001-abcd" }), { headers: { "content-type": "application/json" } });
+    }
+    if (u === "https://api.bland.ai/v1/calls/call-0001-abcd") {
+      assert.equal(auth, "bland-OPERATOR-key");
+      return new Response(JSON.stringify({ completed: true, status: "completed", answered_by: "human", summary: "Booked for 2 at 8pm under Ana.", concatenated_transcript: "...", price: 0.42, from: "+15550001111" }), { headers: { "content-type": "application/json" } });
+    }
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const store = memoryStore();
+  const relay = createRelay(store, { env: { BLAND_API_KEY: "bland-OPERATOR-key", MOMO_PUBLIC_URL: BASE }, fetch: f, phoneCallsPerDay: 2 });
+  assert.deepEqual(await (await call(relay, "/api/config")).json(), { model: null, bot: null, calls: true });
+  const { token } = (await (await call(relay, "/api/devices", { method: "POST" })).json()) as { token: string };
+  const other = (await (await call(relay, "/api/devices", { method: "POST" })).json()) as { token: string };
+
+  // Their Momo calls through the site exactly as it would call the provider.
+  const viaSite = (t: string) => new BlandVoice(`Bearer ${t}`, ((u: string | URL | Request, init?: RequestInit) => relay(new Request(String(u), init))) as typeof fetch, `${BASE}/api`);
+  const voice = viaSite(token);
+  const id = await voice.start({ to: "+1 (415) 555-0199", goal: "Book a table for 2 on Saturday at 8pm under Ana." });
+  assert.equal(id, "call-0001-abcd");
+  assert.equal(placed[0]!.auth, "bland-OPERATOR-key");
+  assert.equal(placed[0]!.body.phone_number, "+14155550199");
+  assert.equal(placed[0]!.body.max_duration, 10, "the length is set by the site, not the caller");
+  assert.match(String(placed[0]!.body.task), /Goal: Book a table for 2/);
+  const outcome = (await voice.check!(id as string)) as Record<string, unknown>;
+  assert.match(voice.outcome(outcome), /Phone call ended \(completed, answered by human\)\.\nSummary: Booked for 2 at 8pm under Ana\./);
+  assert.equal(outcome.price, undefined, "only what Momo reads is passed on");
+
+  // Nobody else can ask about that call; no token, no call; and there is a daily cap.
+  await assert.rejects(viaSite(other.token).check!(id as string), /couldn't check the call \(404\)/);
+  assert.equal((await call(relay, "/api/calls", { method: "POST", body: JSON.stringify({ phone_number: "+14155550199", task: "x" }) })).status, 401);
+  await voice.start({ to: "+14155550199", goal: "again" });
+  await assert.rejects(voice.start({ to: "+14155550199", goal: "a third today" }), /429: too many calls today/);
+  for (const v of store.dump()) assert.ok(!v.includes("bland-OPERATOR-key"));
+  assert.equal((await call(createRelay(memoryStore()), "/api/calls", { method: "POST", token: "x", body: "{}" })).status, 401);
+});

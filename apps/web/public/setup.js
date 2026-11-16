@@ -27,6 +27,9 @@ let config = { model: null, bot: null };
 const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.json() : config)).then((c) => (config = c)).catch(() => config).finally(() => {
   $("s-model").hidden = !!config.model;
   $("s-bot").hidden = !!(config.bot || config.imessage);
+  // Phone calls come with the site: no key to paste.
+  $("calls-own").hidden = !!config.calls;
+  $("calls-included").hidden = !config.calls;
   $("intro-ready").hidden = !(config.model && (config.bot || config.imessage));
   $("intro-manual").hidden = !!(config.model && (config.bot || config.imessage));
 });
@@ -186,6 +189,7 @@ async function settings() {
   if ($("awake").value === "always") lines.push("MOMO_MAINTENANCE=off");
   if ($("awake").value === "off") lines.push("MOMO_AWAKE=off");
   if ($("bland").value.trim()) lines.push(`BLAND_API_KEY=${$("bland").value.trim()}`);
+  else if (config.calls && relay) lines.push("MOMO_CALLS=relay"); // the site places calls; nothing to sign up for
   if (relay) lines.push(`MOMO_RELAY_URL=${origin}`, `MOMO_RELAY_TOKEN=${relay.token}`);
   else say(st, "Note: this site's relay didn't answer, so secure links will only open on this computer.");
   return { text: lines.join("\n") + "\n", relay };

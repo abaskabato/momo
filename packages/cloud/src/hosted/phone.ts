@@ -24,15 +24,18 @@ const CALLER_RULES =
 export class BlandVoice implements VoiceProvider {
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly base: string;
 
-  constructor(apiKey: string, fetchImpl: typeof fetch = fetch) {
+  /** `base`: Bland itself, or the website's relay ("<site>/api") with `apiKey` = "Bearer <this Momo's token>", which calls on the operator's key. */
+  constructor(apiKey: string, fetchImpl: typeof fetch = fetch, base = "https://api.bland.ai/v1") {
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
+    this.base = base.replace(/\/$/, "");
   }
 
   async start(req: { to: string; goal: string; webhookUrl?: string }): Promise<string | void> {
     if (!/^\+\d{8,15}$/.test(req.to.replace(/[\s()-]/g, ""))) throw new Error(`not a phone number: ${req.to}`);
-    const res = await this.fetchImpl("https://api.bland.ai/v1/calls", {
+    const res = await this.fetchImpl(`${this.base}/calls`, {
       method: "POST",
       headers: { authorization: this.apiKey, "content-type": "application/json" },
       body: JSON.stringify({
@@ -49,7 +52,7 @@ export class BlandVoice implements VoiceProvider {
   }
 
   async check(callId: string): Promise<unknown | null> {
-    const res = await this.fetchImpl(`https://api.bland.ai/v1/calls/${encodeURIComponent(callId)}`, { headers: { authorization: this.apiKey } });
+    const res = await this.fetchImpl(`${this.base}/calls/${encodeURIComponent(callId)}`, { headers: { authorization: this.apiKey } });
     if (!res.ok) throw new Error(`couldn't check the call (${res.status})`);
     const b = (await res.json()) as { completed?: boolean; status?: string };
     return b.completed || /^(completed|failed|no-answer|busy|canceled|cancelled)$/i.test(b.status ?? "") ? b : null;

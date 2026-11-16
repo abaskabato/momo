@@ -160,6 +160,8 @@ export function operatorConfig(env) {
       : env.MOMO_GATEWAY_TOKEN && env.MOMO_IMESSAGE_ADDRESS
         ? { gateway: env.MOMO_GATEWAY_TOKEN, number: env.MOMO_IMESSAGE_ADDRESS.trim() }
         : null,
+    // Phone calls for everyone's Momo on the operator's Bland AI key.
+    callsKey: env.BLAND_API_KEY || null,
     publicUrl: env.MOMO_PUBLIC_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null),
   };
 }
@@ -196,10 +198,14 @@ export function operatorConfig(env) {
  *   POST /api/gateway/inbound        the operator's Mac (Bearer MOMO_GATEWAY_TOKEN): texts that arrived in Messages
  *   GET  /api/gateway/outbox         the operator's Mac: answers to send from Messages
  *
+ * Shared phone calls (BLAND_API_KEY on the server):
+ *   POST /api/calls                  their Momo (Bearer): place a call to a business; the key stays here
+ *   GET  /api/calls/<id>             their Momo: how that call went (only the Momo that placed it)
+ *
  * Shared model key (MOMO_MODEL + key on the server):
  *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
  */
-export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600 } = {}) {
+export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600, phoneCallsPerDay = 20 } = {}) {
   const op = operatorConfig(env);
   const tg = (method, body) =>
     f(`${env.TELEGRAM_API_BASE || "https://api.telegram.org"}/bot${op.botToken}/${method}`, {
@@ -324,7 +330,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       } catch (e) {
         imError = e.message;
       }
-      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null, ...(op.imessage ? { imessage: im, ...(imError ? { imessageError: imError } : {}) } : {}) });
+      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null, ...(op.callsKey ? { calls: true } : {}), ...(op.imessage ? { imessage: im, ...(imError ? { imessageError: imError } : {}) } : {}) });
     }
 
     if (path === "devices" && m === "POST") {
@@ -418,6 +424,38 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       }
       const r = await tg("sendMessage", { chat_id: chat, text, disable_web_page_preview: true });
       return r.ok ? json({ ok: true }) : json({ error: r.description ?? "telegram error" }, 502);
+    }
+
+    // --- Shared phone calls --------------------------------------------------
+    if (parts[0] === "calls") {
+      const dev = await device();
+      if (!dev) return json({ error: "unauthorized" }, 401);
+      if (!op.callsKey) return json({ error: "no shared calling" }, 404);
+      const bland = env.BLAND_API_BASE || "https://api.bland.ai/v1";
+      if (parts.length === 1 && m === "POST") {
+        // Calls cost the operator by the minute: a daily cap per Momo, and a fixed length.
+        if ((await store.incr(`rl:calls:${dev}`, 24 * 3600)) > phoneCallsPerDay) return json({ message: "too many calls today" }, 429);
+        const b = await body();
+        const to = typeof b.phone_number === "string" ? b.phone_number.replace(/[\s()-]/g, "") : "";
+        if (!/^\+\d{8,15}$/.test(to) || typeof b.task !== "string" || !b.task || b.task.length > 6000) return json({ message: "bad request" }, 400);
+        const up = await f(`${bland}/calls`, {
+          method: "POST",
+          headers: { authorization: op.callsKey, "content-type": "application/json" },
+          body: JSON.stringify({ phone_number: to, task: b.task, wait_for_greeting: true, max_duration: 10 }),
+        });
+        const out = await up.json().catch(() => ({}));
+        if (up.ok && typeof out.call_id === "string") await store.set(`callof:${out.call_id}`, dev, 7 * 24 * 3600);
+        return json(up.ok ? { call_id: out.call_id } : { message: out.message ?? "call failed" }, up.status);
+      }
+      if (parts.length === 2 && m === "GET") {
+        if (!ID.test(parts[1]) && !/^[\w-]{8,64}$/.test(parts[1])) return json({ error: "not found" }, 404);
+        if ((await store.get(`callof:${parts[1]}`)) !== dev) return json({ error: "not found" }, 404);
+        const up = await f(`${bland}/calls/${encodeURIComponent(parts[1])}`, { headers: { authorization: op.callsKey } });
+        const out = await up.json().catch(() => ({}));
+        // Only what Momo reads: the status and what was said.
+        return json({ completed: out.completed, status: out.status, answered_by: out.answered_by, summary: out.summary, concatenated_transcript: out.concatenated_transcript }, up.status);
+      }
+      return json({ error: "not found" }, 404);
     }
 
     // --- Shared model key ----------------------------------------------------

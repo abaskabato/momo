@@ -134,7 +134,12 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     skills: () => [new RemindersSkill(), web],
     answer: (t, c) => answerer.answer(t, c),
     // Phone calls when a website can't do it (BLAND_API_KEY); off when unset.
-    voice: env.BLAND_API_KEY ? new BlandVoice(env.BLAND_API_KEY) : undefined,
+    // MOMO_CALLS=relay: the website places them on its own key (the setup page writes this when it can).
+    voice: env.BLAND_API_KEY
+      ? new BlandVoice(env.BLAND_API_KEY)
+      : env.MOMO_CALLS === "relay" && relay
+        ? new BlandVoice(`Bearer ${relay.token}`, fetch, `${relay.url.replace(/\/$/, "")}/api`)
+        : undefined,
     // Per-user inboxes: MOMO_EMAIL_DOMAIN's MX goes to an inbound-email service
     // that posts to /v1/hosted/email/<INBOUND_EMAIL_SECRET>.
     emailDomain: env.MOMO_EMAIL_DOMAIN,
@@ -191,7 +196,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           );
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
-      notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses, after your YES)" : "phone calls: off (add BLAND_API_KEY to turn them on)");
+      notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses, after your YES)" : env.MOMO_CALLS === "relay" && relay ? `phone calls: on, through ${relay.url} (Momo can phone businesses, after your YES)` : "phone calls: off (add BLAND_API_KEY to turn them on)");
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");
       if (!isPublic && env.MOMO_RELAY_URL) notes.push(`Secure links: through ${env.MOMO_RELAY_URL} (sealed on the phone; only this computer can open them)`);
       else if (!isPublic) notes.push("No PUBLIC_URL: login/card links only open on this computer. For phones, set up at your Momo website or set PUBLIC_URL.");

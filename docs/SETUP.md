@@ -54,6 +54,8 @@ to update; your saved logins and settings are kept. Logs are in
    - `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY` and `SENDBLUE_NUMBER` for one shared iMessage line
      (a paid line from sendblue.com; no Mac needed). People text the line from Messages; the
      site registers its webhook by itself. Works beside the Telegram bot or instead of it.
+   - `BLAND_API_KEY` (from bland.ai) so every Momo can phone businesses on your key: people get calling
+     with nothing to sign up for. Each Momo is capped at 20 calls a day, 10 minutes each.
    - Or iMessage for free, through a Mac you own: set `MOMO_GATEWAY_TOKEN` (any long random string) and
      `MOMO_IMESSAGE_ADDRESS` (what people text: that Mac's Apple Account email, or its phone number if an
      iPhone is signed in to the same account). Then on the Mac: install Momo from the site as usual, add
