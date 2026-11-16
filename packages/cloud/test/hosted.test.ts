@@ -612,7 +612,7 @@ test("onboarding asks what to connect; the owner names anything, Momo goes and c
   const { rt, app } = runtime(planner, () => FRIDAY_NOON);
   await tg(app, rt, "hey");
   await tg(app, rt, "Ana");
-  assert.match(await tg(app, rt, "San Francisco"), /^All set\. One more thing, and you can skip it: what should I connect to.*Gmail, Google Calendar, Google Drive, WhatsApp, iMessage, Notion, Granola/s);
+  assert.match(await tg(app, rt, "San Francisco"), /^All set\. One last step, so that from here on one text is enough\..*The phone number and email to put on bookings.*What to connect.*Gmail, Google Calendar, Google Drive, WhatsApp, iMessage, Notion, Granola.*A card, for when you ask me to buy something: https:\/\/momo\.example\/s\/.*An address, for deliveries: https:\/\/momo\.example\/s\//s);
 
   // Named loosely, typos and all.
   assert.equal(await tg(app, rt, "gmail and whatsup"), "Gmail: ready. WhatsApp: scan the QR code in my browser window.");
@@ -808,4 +808,60 @@ test("reading something on the side: a second tab is read and closed, and the pa
   assert.match(side, /In a second tab \(now closed/);
   assert.match(side, /\/long/);
   assert.match(seen.find((x) => x.startsWith("read_page:"))!, /search\?q=nopa/, "still on the page it was on");
+});
+
+test("onboarding sets everything up in one reply: booking contact details and connections, with the owner's browser sign-ins fetched first", { timeout: 60_000 }, async () => {
+  const firstTurns: string[] = [];
+  const planner: Planner = {
+    async next(_system, history) {
+      if (history.length === 1) firstTurns.push(JSON.stringify(history[0]));
+      return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Gmail: ready (ana@example.com). Notion: ready." } } as Block];
+    },
+  };
+  // The owner's Chrome is open, so its sign-ins couldn't be copied when Momo started.
+  let chrome = "Chrome";
+  let closed = false;
+  const theirs = {
+    open: () => browser.open(),
+    get needsClosing() { return chrome; },
+    retrySignIns: async () => (closed ? (chrome = "") : chrome),
+  };
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON, { skills: () => [new RemindersSkill(), new WebTaskSkill(planner, theirs)] });
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+
+  // One message with everything.
+  const wait = await tg(app, rt, "360 555 0142, ana@example.com, gmail and notion");
+  assert.equal(wait, 'Saved your phone number and email for bookings. Before I connect Gmail and Notion: close all your Chrome windows once, so I can use the accounts you\'re already signed in to (you can reopen it right after). Text me "done" when they\'re closed, or "skip" and I\'ll ask for logins instead.');
+  assert.equal(firstTurns.length, 0, "nothing is checked with an empty browser");
+
+  // Said done, but it is still running in the background: told how to really close it, once.
+  assert.match(await tg(app, rt, "done"), /^Chrome still looks open\. .*choose Exit or Quit/);
+  closed = true;
+  assert.equal(await tg(app, rt, "ok done"), "Gmail: ready (ana@example.com). Notion: ready.");
+  assert.ok(sent.some((m) => m.text.startsWith("Got your sign-ins. Connecting Gmail and Notion.")));
+
+  // Errands from here on know the phone and email: no form stops to ask.
+  await tg(app, rt, "book a table for 2 at Nopa Friday 7pm");
+  assert.match(firstTurns.at(-1)!, /Known preferences: [^"]*phone: 360 555 0142[^"]*email: ana@example\.com/);
+  assert.match(firstTurns.at(-1)!, /The owner's connected services: Gmail \(https:\/\/mail\.google\.com\), Notion/);
+});
+
+test("onboarding: just the contact details, or an errand instead of closing the browser, both carry on", { timeout: 60_000 }, async () => {
+  const planner: Planner = { async next() { return [{ type: "tool_use", id: "f1", name: "finish", input: { message: "Booked." } } as Block]; } };
+  const a = runtime(planner, () => FRIDAY_NOON);
+  await tg(a.app, a.rt, "hey");
+  await tg(a.app, a.rt, "Ana");
+  await tg(a.app, a.rt, "San Francisco");
+  assert.equal(await tg(a.app, a.rt, "+1 (360) 555-0142 ana@example.com"), 'Saved your phone number and email for bookings. Say "connect Gmail" (or anything else) whenever you want.');
+
+  await redis.flushdb();
+  const theirs = { open: () => browser.open(), needsClosing: "Chrome", retrySignIns: async () => "Chrome" };
+  const b = runtime(planner, () => FRIDAY_NOON, { skills: () => [new RemindersSkill(), new WebTaskSkill(planner, theirs)] });
+  await tg(b.app, b.rt, "hey");
+  await tg(b.app, b.rt, "Ana");
+  await tg(b.app, b.rt, "San Francisco");
+  assert.match(await tg(b.app, b.rt, "gmail"), /^Before I connect Gmail: close all your Chrome windows once/);
+  assert.equal(await tg(b.app, b.rt, "book a table for 2 at Nopa Friday 7pm"), "Booked.");
 });

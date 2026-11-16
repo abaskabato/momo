@@ -239,6 +239,16 @@ export class WebTaskSkill implements Skill {
     return /\b(call|phone|ring|buy|order|purchase|book|reserve|schedule|sign me up|sign up|register|cancel|renew|pay|return|refund|apply|fill out|submit|subscribe|unsubscribe|rebook|reorder|get me)\b/i.test(text);
   }
 
+  /** The owner's everyday browser that must be closed once before Momo can use its sign-ins ("" = nothing to wait for). */
+  signInsWaiting(): string {
+    return (this.browser as { needsClosing?: string }).needsClosing ?? "";
+  }
+
+  /** The owner says it's closed: copy the sign-ins now. Returns what is still being waited for. */
+  async retrySignIns(): Promise<string> {
+    return (await (this.browser as { retrySignIns?: () => Promise<string> }).retrySignIns?.()) ?? "";
+  }
+
   async start(task: Task, ctx: SkillContext): Promise<void> {
     const name = await ctx.memory.get("owner.name");
     const city = await ctx.memory.get("owner.city");

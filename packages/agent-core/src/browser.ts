@@ -275,6 +275,20 @@ export class VisibleBrowser implements BrowserSessionFactory {
     return chromium.launchPersistentContext(this.o.profileDir, { ...base, viewport: { width: 1280, height: 860 }, headless: true });
   }
 
+  /** The owner's everyday browser that has to be closed once before its sign-ins can be copied ("" = nothing to wait for). */
+  get needsClosing(): string {
+    return this.waitingFor;
+  }
+
+  /** The owner says their browser is closed now: try the copy again. Returns what is still being waited for. */
+  async retrySignIns(): Promise<string> {
+    if (this.waitingFor && this.tabs === 0) {
+      await this.dispose(); // Momo's own window must not be running in the folder the copy lands in
+      await this.prepare();
+    }
+    return this.waitingFor;
+  }
+
   async open(account?: string) {
     // Still waiting for the owner to close their browser: try again whenever nothing is in progress.
     if (this.waitingFor && this.tabs === 0 && this.context) await this.dispose();

@@ -57,6 +57,8 @@ export interface PendingForm {
   label: string;
   taskId: string;
   createdAt: number;
+  /** Set up ahead of any errand (onboarding): where to say it was saved. */
+  to?: { channel: Channel; threadId: string };
 }
 
 export interface HandleResult {
@@ -383,7 +385,7 @@ export class Assistant {
     const busy = JSON.parse((await this.d.memory.get("busy.last")) ?? "null") as { from: number; until: number; what: string } | null;
     const during = !!this.d.answer && !!busy && msg.receivedAt >= busy.from - 1000 && msg.receivedAt + 1000 < busy.until && !/https?:\/\//i.test(text);
     let skill = asking || during ? undefined : this.d.skills.find((s) => s.matches(text));
-    if (!skill && (await this.onboard(text, say))) return { handled: true };
+    if (!skill && (await this.onboard(msg, text, say))) return { handled: true };
     if (!skill && this.d.answer) {
       // Not obviously an errand by its wording: let the model say whether it's something to DO.
       const doer = asking ? undefined : this.d.skills.find((s) => s.name === "web");
@@ -448,8 +450,11 @@ export class Assistant {
         postal: clean("postal"), country: clean("country") || "US", phone: clean("phone") || undefined,
       });
     }
-    const task = await this.d.tasks.get(form.taskId);
-    if (!task) return;
+    const task = form.taskId ? await this.d.tasks.get(form.taskId) : undefined;
+    if (!task) {
+      if (form.to) await this.d.outbound.send(form.to.channel, form.to.threadId, form.kind === "card" ? "Saved your card. I'll use it when you ask me to buy something, and I still ask before every purchase." : "Saved your address. Deliveries go there from now on.");
+      return;
+    }
     await this.d.outbound.send(task.channel, task.threadId, `Saved your ${form.label}${form.kind === "login" ? " login" : ""}. Continuing.`);
     const skill = this.skill(task.skill);
     if (skill?.onInput && task.status === "awaiting_input") await this.guard(task, () => skill.onInput!(task, "done", this.ctx));
@@ -494,7 +499,7 @@ export class Assistant {
   }
 
   /** One question per text; any task request skips straight past it. */
-  private async onboard(text: string, say: (t: string) => Promise<void>): Promise<boolean> {
+  private async onboard(msg: InboundMessage, text: string, say: (t: string) => Promise<void>): Promise<boolean> {
     const step = (await this.d.owners.state()).onboarding;
     if (step === "welcome") {
       await this.d.owners.setOnboarding("name");
@@ -516,10 +521,22 @@ export class Assistant {
       await this.d.memory.set("owner.city", text.replace(/^(i'?m in|in)\s+/i, "").replace(/[.!]+$/, "").trim());
       await this.d.owners.setOnboarding("done");
       await this.d.memory.set("connect.ask", "1");
+      // Everything an errand might stop to ask for later is offered here, once, in one message.
+      const links: string[] = [];
+      if (this.d.secureLinks) {
+        for (const [kind, label, what] of [["card", "card", "A card, for when you ask me to buy something"], ["address", "delivery address", "An address, for deliveries"]] as const) {
+          const link = await this.d.secureLinks.create({ kind, label });
+          await this.d.pendingForms.update((all) => all.concat({ id: link.id, kind, label, taskId: "", createdAt: this.ctx.now().getTime(), to: { channel: msg.channel, threadId: msg.threadId } }));
+          links.push(`• ${what}: ${link.url}`);
+        }
+      }
       await say(
-        "All set. One more thing, and you can skip it: what should I connect to, so I can work with your own stuff?\n" +
-          `${CONNECTIONS.map((c) => c.name).join(", ")}, or anything else you use.\n` +
-          "Reply with the ones you want (or \"all\"), or just text me an errand, like:\n" +
+        "All set. One last step, so that from here on one text is enough. Reply in one message with whatever applies (or skip it all):\n" +
+          "• The phone number and email to put on bookings\n" +
+          `• What to connect, so I can work with your own stuff: ${CONNECTIONS.map((c) => c.name).join(", ")}, or anything else you use (or "all")\n` +
+          (links.length ? `${links.join("\n")}\n` : "") +
+          "For example: 360 555 0142, ana@example.com, Gmail, Google Calendar and Notion\n\n" +
+          "Or just text me an errand, like:\n" +
           "• book a table for 2 at Nopa Friday 7pm\n" +
           "• remind me to call mom tomorrow at 6pm\n" +
           "STOP cancels anything I'm doing. UNDO reverses the last thing I did. HELP shows this again.",
@@ -531,6 +548,23 @@ export class Assistant {
 
   /** The owner names services to connect: remember them, then go and check each one is signed in. */
   private async connect(msg: InboundMessage, text: string, say: (t: string) => Promise<void>): Promise<HandleResult | undefined> {
+    // Waiting for the owner to close their browser, so its sign-ins can be used for what they picked.
+    const held = JSON.parse((await this.d.memory.get("connect.wait")) || "null") as { picked: Connection[]; tries: number } | null;
+    if (held) {
+      await this.d.memory.set("connect.wait", "");
+      // An errand texted instead: that comes first; "connect ..." picks this up again any time.
+      if (/https?:\/\//i.test(text) || this.d.skills.some((k) => k.matches(text))) return undefined;
+      const web = this.skill("web") as (Skill & { retrySignIns?: () => Promise<string> }) | undefined;
+      const skip = /^(skip|no|nope|later|not now|can'?t)\b/i.test(text.trim());
+      const still = skip ? "" : ((await web?.retrySignIns?.().catch(() => "")) ?? "");
+      if (still && held.tries < 2) {
+        await this.d.memory.set("connect.wait", JSON.stringify({ picked: held.picked, tries: held.tries + 1 }));
+        await say(`${still} still looks open. It can keep running after its windows close: right-click its icon near the clock (or in the menu bar) and choose Exit or Quit. Text me "done" then, or "skip" and I'll ask for logins instead.`);
+        return { handled: true };
+      }
+      return this.startConnecting(msg, held.picked, say, skip || still ? "" : "Got your sign-ins. ");
+    }
+
     const justAsked = (await this.d.memory.get("connect.ask")) === "1";
     if (justAsked) await this.d.memory.set("connect.ask", "");
     const asked = /^(?:please\s+)?connect(?:\s+(?:to|me to|my|with))?\s+(.+)$/i.exec(text)?.[1];
@@ -539,18 +573,47 @@ export class Assistant {
       await say("No problem. Say \"connect Gmail\" (or anything else) whenever you want.");
       return { handled: true };
     }
-    const picked = pickConnections(asked ?? text, !asked);
-    if (!picked.length) return undefined; // not an answer to the question: carry on as a normal message
+    // The same reply may carry the phone and email for bookings: kept, so no form ever has to stop and ask.
+    let rest = asked ?? text;
+    const kept: string[] = [];
+    if (!asked) {
+      const email = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(rest)?.[0];
+      if (email) rest = rest.replace(email, " ");
+      const phone = /\+?\d[\d\s().-]{7,}\d/.exec(rest)?.[0];
+      if (phone && phone.replace(/\D/g, "").length >= 10) rest = rest.replace(phone, " ");
+      if (phone && phone.replace(/\D/g, "").length >= 10) (await this.d.memory.set("pref.phone", phone.trim()), kept.push("phone number"));
+      if (email) (await this.d.memory.set("pref.email", email), kept.push("email"));
+      rest = rest.replace(/^[\s,;.]+|[\s,;.]+$/g, "").replace(/\s*,(\s*,)+/g, ",");
+    }
+    const picked = pickConnections(rest, !asked);
+    if (!picked.length) {
+      if (!kept.length) return undefined; // not an answer to the question: carry on as a normal message
+      await say(`Saved your ${list(kept)} for bookings. Say "connect Gmail" (or anything else) whenever you want.`);
+      return { handled: true };
+    }
     const before = JSON.parse((await this.d.memory.get("owner.connections")) || "[]") as Connection[];
     const all = [...before.filter((b) => !picked.some((p) => p.name === b.name)), ...picked];
     await this.d.memory.set("owner.connections", JSON.stringify(all));
+    const saved = kept.length ? `Saved your ${list(kept)} for bookings. ` : "";
+    // Their own browser is open, so its sign-ins couldn't be copied yet: get that done first, once,
+    // rather than asking for a password per service.
+    const waitingOn = (this.skill("web") as (Skill & { signInsWaiting?: () => string }) | undefined)?.signInsWaiting?.() ?? "";
+    if (waitingOn) {
+      await this.d.memory.set("connect.wait", JSON.stringify({ picked, tries: 1 }));
+      await say(`${saved}Before I connect ${list(picked.map((c) => c.name))}: close all your ${waitingOn} windows once, so I can use the accounts you're already signed in to (you can reopen it right after). Text me "done" when they're closed, or "skip" and I'll ask for logins instead.`);
+      return { handled: true };
+    }
+    return this.startConnecting(msg, picked, say, saved);
+  }
+
+  private async startConnecting(msg: InboundMessage, picked: Connection[], say: (t: string) => Promise<void>, lead = ""): Promise<HandleResult> {
     const web = this.skill("web");
     const notes = picked.filter((c) => c.note).map((c) => `${c.name}: ${c.note}`);
-    await say(`Connecting ${list(picked.map((c) => c.name))}. I'll open each one and tell you which are ready.${notes.length ? `\n${notes.join("\n")}` : ""}`);
+    await say(`${lead}Connecting ${list(picked.map((c) => c.name))}. I'll open each one and tell you which are ready.${notes.length ? `\n${notes.join("\n")}` : ""}`);
     if (!web) return { handled: true };
     const request =
       `Connect the owner's accounts. For each service below, open it and see whether it is signed in. If it isn't, try the owner's other browser accounts (use_account), then sign_in. ` +
-      `Don't read, send or change anything in them. Finish with one short line per service: ready, or exactly what the owner needs to do.\n` +
+      `Don't read, send or change anything in them. Finish with one short line per service: ready (and under which account), or exactly what the owner needs to do.\n` +
       picked.map((c) => `- ${c.name}${c.url ? `: ${c.url}` : c.app ? `: the ${c.app} app on this computer (computer_open)` : ": find its website or app"}`).join("\n");
     const task = await this.d.tasks.create({ skill: web.name, channel: msg.channel, threadId: msg.threadId, from: msg.from, request });
     await this.guard(task, () => web.start(task, this.ctx));
