@@ -781,3 +781,31 @@ test("a question is asked once: 'why do you need it' is an answer, not a reason 
   assert.match(await tg(app, rt, "where what should go?"), /went on without an address/);
   assert.equal(sent.filter((m) => /Add it here/.test(m.text)).length, 1, "the question went out once");
 });
+
+test("reading something on the side: a second tab is read and closed, and the page the errand is on stays put", { timeout: 60_000 }, async () => {
+  let n = 0;
+  const seen: string[] = [];
+  const call = (name: string, input: Record<string, unknown> = {}): Block[] => [{ type: "tool_use", id: `l${++n}`, name, input }];
+  const planner: Planner = {
+    async next(system, history) {
+      assert.match(system, /Decide, do, report/);
+      assert.match(system, /Never tell them to send something again/);
+      const r = (history.at(-1)!.content.find((b) => b.type === "tool_result") as { content: string } | undefined)?.content ?? "";
+      const prev = history.at(-2)?.content.find((b) => b.type === "tool_use") as { name: string } | undefined;
+      if (prev) seen.push(`${prev.name}: ${r}`);
+      if (!prev) return call("goto", { url: `${site.origin}/search?q=nopa` });
+      if (prev.name === "goto") return call("look_at", { url: `${site.origin}/long` });
+      if (prev.name === "look_at") return call("read_page");
+      return call("finish", { message: "Looked on the side and carried on where I was." });
+    },
+  };
+  const { rt, app } = runtime(planner, () => FRIDAY_NOON);
+  await tg(app, rt, "hey");
+  await tg(app, rt, "Ana");
+  await tg(app, rt, "San Francisco");
+  assert.match(await tg(app, rt, "book a table for 2 at Nopa tonight at 7pm"), /carried on where I was/);
+  const side = seen.find((x) => x.startsWith("look_at:"))!;
+  assert.match(side, /In a second tab \(now closed/);
+  assert.match(side, /\/long/);
+  assert.match(seen.find((x) => x.startsWith("read_page:"))!, /search\?q=nopa/, "still on the page it was on");
+});
