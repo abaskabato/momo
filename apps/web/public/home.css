@@ -1,88 +1,199 @@
-/* Momo's home page: a short letter. White page, one column of serif prose
-   set at reading size, examples underlined, and one action written as words.
-   Everything else (fields, buttons, notes) comes from style.css. */
+/* Momo's home page is a to-do list. A headline, a list that ticks itself off
+   in red pen, and then your own short list: the two things to paste, which
+   tick when they check out. Paper and ink, one colour for the pen. Follows
+   the visitor's light or dark setting. Scoped to body.home. */
 
-body.home header.site { padding: 36px 36px 0; }
-body.home header.site .wordmark { font-size: 26px; font-weight: 600; }
-main.home { max-width: 732px; padding: 96px 36px 56px; }
-
-.letter h1,
-.letter p.lede {
-  font: 400 24px/1.3 var(--serif);
-  letter-spacing: -0.01em;
-  margin: 0 0 31px;
+body.home {
+  color-scheme: light dark;
+  --bg: #f4f1ea;
+  --fg: #141412;
+  --mut: #77736a;
+  --line: rgba(20, 20, 18, 0.14);
+  --pen: #f0431c;
+  --mark: transparent;
+  --ok: #1f7a3d;
+  --bad: #c0321a;
+  --serif: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "Inter", system-ui, sans-serif;
+  background: var(--bg);
   color: var(--fg);
+  -webkit-font-smoothing: antialiased;
 }
-.letter h1 { font-weight: 500; }
-/* Things you might text it: underlined, like a pencil mark under each. */
-.letter u {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 5px;
-  text-decoration-color: var(--line);
+@media (prefers-color-scheme: dark) {
+  body.home {
+    --bg: #0f0f0d;
+    --fg: #f4f1ea;
+    --mut: #918c81;
+    --line: rgba(244, 241, 234, 0.16);
+    --pen: #ff5a33;
+    --ok: #6fd691;
+    --bad: #ff8d78;
+  }
+  body.home select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23f4f1ea' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  }
+  body.home select option { background: #1a1a17; color: var(--fg); }
 }
-.letter #download { margin: 6px 0 0; font-weight: 600; }
-/* Which computer: three quiet words under the action. */
-.letter .tabs { margin-top: 12px; }
-.letter .tabs button { font-size: 15px; }
 
-/* The steps, when there is something to paste. */
-.steps { margin: 17px 0 0; }
-.steps > p.lede { margin-bottom: 0; }
-.steps section.step { margin-top: 36px; }
-.steps + #download { margin-top: 30px; }
-.steps details.options { margin-top: 10px; }
-.steps details.options summary { font: 400 13px/1.4 var(--sans); }
-.letter p.note { max-width: 34em; margin-top: 16px; }
-.letter #after { margin-top: 28px; }
-.letter p.lede.small { font-size: 20px; margin: 0 0 14px; }
-.letter p.lede.small b { font-weight: 600; }
+body.home header.site,
+body.home footer.legal,
+main.home {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+body.home header.site { align-items: center; padding-top: 26px; }
+body.home header.site .wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font: 700 18px/1 var(--serif);
+  letter-spacing: -0.03em;
+}
+body.home header.site nav a,
+body.home footer.legal,
+body.home footer.legal a { font: 400 13px/1.4 var(--serif); color: var(--mut); text-decoration: none; }
+body.home header.site nav a:hover, body.home footer.legal a:hover { color: var(--fg); }
 
-details.settings { margin-top: 72px; }
+/* The box, and the pen's tick. Used in the name, the list and your steps. */
+.box {
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--fg);
+  border-radius: 6px;
+}
+.box::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: -5px;
+  width: 9px;
+  height: 19px;
+  border: solid var(--pen);
+  border-width: 0 3px 3px 0;
+  border-radius: 1px;
+  transform: rotate(40deg) scale(0);
+  transform-origin: 60% 90%;
+  opacity: 0;
+}
+.box.on::after,
+.todo .box::after,
+.steps section.step:has(.note.ok) .box::after { transform: rotate(40deg) scale(1); opacity: 1; }
+.wordmark .box { width: 16px; height: 16px; border-radius: 5px; }
+.wordmark .box::after { left: 4px; top: -4px; width: 7px; height: 14px; border-width: 0 2.5px 2.5px 0; }
+
+main.home { padding-top: clamp(40px, 9vh, 96px); padding-bottom: 48px; }
+
+.page h1 {
+  font: 700 clamp(52px, 12.5vw, 124px) / 0.9 var(--serif);
+  letter-spacing: -0.065em;
+  margin: 0 0 clamp(22px, 4vh, 34px);
+}
+.page h1 b { font-weight: inherit; color: var(--pen); }
+.page p.lede {
+  font: 400 clamp(19px, 2.6vw, 23px) / 1.35 var(--serif);
+  letter-spacing: -0.02em;
+  max-width: 27em;
+  margin: 0 0 clamp(28px, 5vh, 44px);
+}
+
+/* The list: ruled lines; each is ticked, then struck, one after another. */
+.todo { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.todo li,
+.steps section.step h2 {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font: 500 clamp(18px, 2.5vw, 21px) / 1.25 var(--serif);
+  letter-spacing: -0.02em;
+}
+.todo li { padding: 15px 0; border-bottom: 1px solid var(--line); }
+.todo s {
+  text-decoration: none;
+  background: linear-gradient(currentColor, currentColor) no-repeat 0 56% / 0 1.5px;
+  animation: cross 0.45s ease-out forwards, fade 0.45s ease-out forwards;
+}
+.todo .box::after { animation: tick 0.3s cubic-bezier(0.3, 1.6, 0.5, 1) backwards; }
+.todo li:nth-child(1) .box::after { animation-delay: 0.6s; }
+.todo li:nth-child(2) .box::after { animation-delay: 1.3s; }
+.todo li:nth-child(3) .box::after { animation-delay: 2s; }
+.todo li:nth-child(4) .box::after { animation-delay: 2.7s; }
+.todo li:nth-child(1) s { animation-delay: 0.8s; }
+.todo li:nth-child(2) s { animation-delay: 1.5s; }
+.todo li:nth-child(3) s { animation-delay: 2.2s; }
+.todo li:nth-child(4) s { animation-delay: 2.9s; }
+@keyframes tick { from { transform: rotate(40deg) scale(0); opacity: 0; } }
+@keyframes cross { to { background-size: 100% 1.5px; } }
+@keyframes fade { to { color: var(--mut); } }
+
+.page p.how {
+  font: 400 15px/1.4 var(--serif);
+  letter-spacing: -0.005em;
+  color: var(--mut);
+  margin: 16px 0 0;
+}
+
+/* Your list: the same boxes, empty until what you paste checks out. */
+.steps { margin-top: clamp(44px, 8vh, 72px); }
+.steps .yours { font: 700 clamp(28px, 5vw, 40px) / 1 var(--serif); letter-spacing: -0.045em; color: var(--fg); margin: 0 0 20px; }
+.steps section.step { margin: 0; padding: 16px 0 18px; border-top: 1px solid var(--line); }
+.steps section.step h2 { margin: 0 0 6px; }
+.steps section.step .box::after { transition: transform 0.3s cubic-bezier(0.3, 1.6, 0.5, 1), opacity 0.2s; }
+.steps section.step > p, .steps section.step > div, .steps section.step > input, .steps section.step > details { margin-left: 36px; }
+.steps section.step > input { width: calc(100% - 36px); }
+.steps #model-status:empty, .steps #bot-status:empty { display: block; }
+.steps #model-status, .steps #bot-status { min-height: 1.5em; margin-top: 6px; margin-bottom: 0; }
+.steps details.options summary { font: 400 13px/1.4 var(--serif); }
+body.home input, body.home select { font: 400 17px/1.3 var(--serif); letter-spacing: -0.01em; }
+body.home input::placeholder { color: var(--mut); opacity: 0.6; }
+body.home label { font: 400 13px/1.4 var(--serif); }
+body.home p.note a, body.home section.step p a { text-decoration-color: var(--line); }
+
+/* The one action: ink, with the pen's colour when you reach for it. */
+.page #download {
+  margin: 30px 0 0;
+  padding: 18px 30px;
+  font: 600 18px/1 var(--serif);
+  letter-spacing: -0.02em;
+  color: var(--bg);
+  background: var(--fg);
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.page #download::after { content: " →"; color: inherit; white-space: pre; }
+.page #download:hover { background: var(--pen); color: #fff; }
+.page #download:active { transform: scale(0.98); }
+.page #download:focus-visible { outline: 2px solid var(--pen); outline-offset: 3px; }
+.page #download:disabled { opacity: 0.5; }
+.page .tabs { margin-top: 14px; gap: 16px; }
+body.home .tabs button, body.home button.quiet { font: 400 14px/1.3 var(--serif); letter-spacing: 0; text-decoration-color: var(--line); background: none; }
+body.home .tabs button[aria-pressed=true] { background: none; text-decoration-color: var(--pen); text-decoration-thickness: 2px; }
+.page p.note { max-width: 34em; margin-top: 14px; }
+.page #after { margin-top: 26px; }
+.page p.lede.small { font-size: 17px; margin: 0 0 12px; }
+.page p.lede.small b { font-weight: 600; }
+
+details.settings { margin-top: 64px; }
 details.settings > summary {
   cursor: pointer;
   width: max-content;
-  font: 400 13px/1.4 var(--sans);
-  letter-spacing: -0.01em;
-  color: var(--fg);
+  font: 400 13px/1.4 var(--serif);
+  color: var(--mut);
   list-style: none;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: var(--line);
 }
 details.settings > summary::-webkit-details-marker { display: none; }
-details.settings section.step { margin-top: 40px; }
-details.settings section.step h2 { font-size: 22px; }
+details.settings > summary::after { content: " +"; }
+details.settings[open] > summary::after { content: " –"; }
+details.settings > summary:hover { color: var(--fg); }
+details.settings section.step { margin-top: 36px; }
+details.settings section.step h2 { font: 600 19px/1.3 var(--serif); letter-spacing: -0.02em; }
+body.home footer.legal { padding-top: 32px; padding-bottom: 32px; }
 
-body.home footer.legal { padding: 48px 36px 36px; color: var(--fg); }
-body.home footer.legal a { color: var(--fg); }
-
-@media (max-width: 560px) {
-  body.home header.site { padding: 24px 20px 0; }
-  main.home { padding: 56px 20px 40px; }
-  body.home footer.legal { padding: 40px 20px 28px; }
-  .letter h1, .letter p.lede { font-size: 21px; margin-bottom: 26px; }
-}
-
-/* The line that says a key was checked keeps its place, so nothing jumps when it appears. */
-.steps #model-status:empty, .steps #bot-status:empty { display: block; }
-.steps #model-status, .steps #bot-status { min-height: 1.5em; margin: 8px 0 0; }
-
-/* The list: written out, then crossed off one line at a time. */
-.todo { list-style: none; margin: 0 0 31px; padding: 0; }
-.todo li { font: 400 24px/1.3 var(--serif); letter-spacing: -0.01em; margin: 0 0 6px; }
-.todo s {
-  text-decoration: none;
-  background: linear-gradient(currentColor, currentColor) no-repeat 0 58% / 0 1.5px;
-  animation: cross 0.5s ease-out forwards, fade 0.5s ease-out forwards;
-}
-.todo li:nth-child(1) s { animation-delay: 0.7s, 0.9s; }
-.todo li:nth-child(2) s { animation-delay: 1.4s, 1.6s; }
-.todo li:nth-child(3) s { animation-delay: 2.1s, 2.3s; }
-.todo li:nth-child(4) s { animation-delay: 2.8s, 3s; }
-@keyframes cross { to { background-size: 100% 1.5px; } }
-@keyframes fade { to { color: var(--mut); } }
 @media (prefers-reduced-motion: reduce) {
   .todo s { animation: none; background-size: 100% 1.5px; color: var(--mut); }
+  .todo .box::after { animation: none; }
 }
-@media (max-width: 560px) { .todo li { font-size: 21px; } .todo { margin-bottom: 26px; } }

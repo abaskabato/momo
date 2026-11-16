@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Momo</title>
 <meta name="description" content="Momo is a personal assistant that knows what matters to you, and keeps it on your own computer. Text it your list. It crosses it off.">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#f4f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f0f0d" media="(prefers-color-scheme: dark)">
 <link rel="preload" href="/fonts/newsreader.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/home.css">
@@ -14,22 +15,24 @@
 </head>
 <body class="home">
 <header class="site">
-  <a href="/" class="wordmark">Momo</a>
+  <a href="/" class="wordmark"><i class="box on" aria-hidden="true"></i>momo</a>
   <nav><a href="https://github.com/abaskabato/momo" rel="noopener">Source</a></nav>
 </header>
 <main class="home">
-  <section class="letter" id="s-get">
-    <h1>Momo is a personal assistant that knows what matters to you, and keeps it on your own computer.</h1>
-    <ul class="todo" aria-label="A to-do list, crossed off">
-      <li><s>Book the dentist</s></li>
-      <li><s>Order the groceries</s></li>
-      <li><s>Get the refund from the airline</s></li>
-      <li><s>Everything else on a screen</s></li>
+  <section class="page" id="s-get">
+    <h1>Consider it done<b>.</b></h1>
+    <p class="lede">Momo is a personal assistant that knows what matters to you, and keeps it on your own computer.</p>
+    <ul class="todo" aria-label="A to-do list, ticked off">
+      <li><i class="box" aria-hidden="true"></i><s>Book the dentist</s></li>
+      <li><i class="box" aria-hidden="true"></i><s>Order the groceries</s></li>
+      <li><i class="box" aria-hidden="true"></i><s>Get the refund from the airline</s></li>
+      <li><i class="box" aria-hidden="true"></i><s>Everything else on a screen</s></li>
     </ul>
-    <p class="lede">Text it your list. It crosses it off.</p>
+    <p class="how">Text it your list. It ticks it off.</p>
     <div class="steps" id="steps" hidden>
+      <p class="yours">Your list is shorter.</p>
       <section class="step" id="s-model" hidden>
-        <h2><span class="num">1</span>AI key</h2>
+        <h2><i class="box" aria-hidden="true"></i>Paste an AI key</h2>
         <p class="note" id="key-help"></p>
         <div id="key-row">
           <input id="key" aria-label="AI key" placeholder="Paste it here" autocomplete="off" spellcheck="false">
@@ -46,7 +49,7 @@
         </details>
       </section>
       <section class="step" id="s-bot" hidden>
-        <h2><span class="num">2</span>Telegram bot</h2>
+        <h2><i class="box" aria-hidden="true"></i>Paste a Telegram bot</h2>
         <p>Message <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> <b>/newbot</b>. It gives you a token.</p>
         <input id="bot" aria-label="Telegram bot token" autocomplete="off" spellcheck="false" placeholder="Paste it here">
         <p class="note" id="bot-status" role="status"></p>
