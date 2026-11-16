@@ -54,6 +54,12 @@ to update; your saved logins and settings are kept. Logs are in
    - `SENDBLUE_API_KEY_ID`, `SENDBLUE_API_SECRET_KEY` and `SENDBLUE_NUMBER` for one shared iMessage line
      (a paid line from sendblue.com; no Mac needed). People text the line from Messages; the
      site registers its webhook by itself. Works beside the Telegram bot or instead of it.
+   - Or iMessage for free, through a Mac you own: set `MOMO_GATEWAY_TOKEN` (any long random string) and
+     `MOMO_IMESSAGE_ADDRESS` (what people text: that Mac's Apple Account email, or its phone number if an
+     iPhone is signed in to the same account). Then on the Mac: install Momo from the site as usual, add
+     `MOMO_GATEWAY_TOKEN=<the same string>` to `~/.momo/momo.env`, and run the installer again. In System
+     Settings > Privacy & Security give Full Disk Access to `~/.momo/node/bin/node` (so it can read Messages)
+     and allow it to control Messages the first time it sends. The Mac must stay on with Messages signed in.
      The site points its webhook at itself and routes each chat to the Momo
      that paired with it. Set `MOMO_PUBLIC_URL` to the site's https address.
 4. Deploy. The site's home page is the download page.

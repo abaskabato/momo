@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -404,4 +404,70 @@ test("relay: a shared iMessage line: text the code to pair, texts reach that per
   await call(relay, "/api/send", { method: "POST", token, body: JSON.stringify({ text: "Back here." }) });
   assert.equal(line.at(-1)!.body.content, "Back here.");
   for (const v of store.dump()) assert.ok(!v.includes("sb-SECRETKEY"), "the line's key never lands in storage");
+});
+
+test("iMessage for free: a Mac passes texts from Messages to the relay and sends the answers; old conversations are left alone", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { IMessageGateway, decodeAttributedBody, canBeGateway } = await import("../src/imessage-gateway.ts");
+  const dir = mkdtempSync(join(tmpdir(), "momo-imsg-"));
+  const dbPath = join(dir, "chat.db");
+  // Messages' own database, as far as the gateway reads it.
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+           CREATE TABLE message (ROWID INTEGER PRIMARY KEY AUTOINCREMENT, guid TEXT, text TEXT, attributedBody BLOB, handle_id INTEGER, is_from_me INTEGER DEFAULT 0, cache_roomnames TEXT, associated_message_type INTEGER DEFAULT 0);
+           INSERT INTO handle VALUES (1, '+13605550142'), (2, 'ana@icloud.com');
+           INSERT INTO message (guid, text, handle_id) VALUES ('old-1', 'an old chat from last year', 1);`);
+  const put = db.prepare("INSERT INTO message (guid, text, attributedBody, handle_id, is_from_me, cache_roomnames, associated_message_type) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  // How newer macOS stores the words: inside an archived attributed string, with `text` empty.
+  const archived = (words: string) => {
+    const w = Buffer.from(words, "utf8");
+    const len = w.length < 0x80 ? Buffer.from([w.length]) : Buffer.from([0x81, w.length & 0xff, w.length >> 8]);
+    return Buffer.concat([Buffer.from("\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84\x12NSAttributedString\x00\x84\x84\x08NSObject\x00\x85\x92\x84\x84\x84\x08NSString\x01\x94\x84\x01+", "latin1"), len, w, Buffer.from("\x86\x84\x02iI\x01", "latin1")]);
+  };
+  assert.equal(decodeAttributedBody(archived("book a table for two")), "book a table for two");
+  const long = "é".repeat(100) + " and more";
+  assert.equal(decodeAttributedBody(archived(long)), long);
+  assert.equal(decodeAttributedBody(Buffer.from("nothing here")), "");
+  assert.match(canBeGateway("win32")!, /only runs on a Mac/);
+  assert.equal(canBeGateway("darwin", dbPath), undefined);
+
+  const store = memoryStore();
+  const env = { MOMO_PUBLIC_URL: "https://momo-web.example", MOMO_GATEWAY_TOKEN: "gw-SECRET-token", MOMO_IMESSAGE_ADDRESS: "momo@icloud.com" };
+  const relay = createRelay(store, { env });
+  assert.deepEqual(await (await call(relay, "/api/config")).json(), { model: null, bot: null, imessage: "momo@icloud.com" });
+  const { token, pair } = (await (await call(relay, "/api/devices", { method: "POST" })).json()) as { token: string; pair: string };
+  assert.equal((await relay(new Request(`${BASE}/api/gateway/outbox`, { headers: { authorization: "Bearer wrong" } }))).status, 401);
+
+  const sentFromMac: Array<[string, string]> = [];
+  const gw = new IMessageGateway({
+    relayUrl: BASE, token: "gw-SECRET-token", dbPath, statePath: join(dir, "state.json"),
+    fetch: ((u: string | URL | Request, init?: RequestInit) => relay(new Request(String(u), init))) as typeof fetch,
+    send: async (to, text) => void sentFromMac.push([to, text]),
+  });
+  const inbox = async () => ((await (await call(relay, "/api/inbox", { token })).json()) as { messages: Array<{ from: string; text: string }> }).messages.map((m) => [m.from, m.text]);
+
+  // First round: nothing from before the gateway started is anybody's errand.
+  assert.deepEqual(await gw.tick(), { in: 0, out: 0 });
+
+  // A stranger texts the Mac: told where to get their own. The owner texts the code, then an errand.
+  put.run("m-1", "hello?", null, 2, 0, null, 0);
+  assert.deepEqual(await gw.tick(), { in: 1, out: 1 });
+  assert.deepEqual(sentFromMac.at(-1), ["ana@icloud.com", "This is Momo. To get your own, open https://momo-web.example and follow the steps; it takes a few minutes."]);
+  put.run("m-2", pair, null, 1, 0, null, 0);
+  put.run("m-3", null, archived("book a table for two"), 1, 0, null, 0);
+  put.run("m-4", "what Momo itself sent", null, 1, 1, null, 0);
+  put.run("m-5", "a group chat", null, 1, 0, "chat123", 0);
+  put.run("m-6", "Loved “book a table for two”", null, 1, 0, null, 2000);
+  assert.deepEqual(await gw.tick(), { in: 2, out: 0 });
+  assert.deepEqual(await inbox(), [["im:+13605550142", "hi"], ["im:+13605550142", "book a table for two"]]);
+
+  // Their Momo answers; the Mac sends it from Messages. After a restart nothing is passed on twice.
+  assert.equal((await call(relay, "/api/send", { method: "POST", token, body: JSON.stringify({ text: "On it." }) })).status, 200);
+  const again = new IMessageGateway({ relayUrl: BASE, token: "gw-SECRET-token", dbPath, statePath: join(dir, "state.json"), fetch: ((u: string | URL | Request, init?: RequestInit) => relay(new Request(String(u), init))) as typeof fetch, send: async (to, text) => void sentFromMac.push([to, text]) });
+  assert.deepEqual(await again.tick(), { in: 0, out: 1 });
+  assert.deepEqual(sentFromMac.at(-1), ["+13605550142", "On it."]);
+  assert.deepEqual(await inbox(), []);
+  for (const v of store.dump()) assert.ok(!v.includes("gw-SECRET-token"));
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
 });

@@ -164,6 +164,16 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       if (browser instanceof VisibleBrowser) void browser.prepare().then((r) => console.log(`  sign-ins and saved passwords: ${r}`), () => {});
       if (awake) notes.push(awake.note);
       keepAwake?.start();
+      // This Mac as everybody's iMessage line: MOMO_GATEWAY_TOKEN (the same one set on the website).
+      if (env.MOMO_GATEWAY_TOKEN && env.MOMO_RELAY_URL) {
+        const { IMessageGateway, canBeGateway } = await import("./imessage-gateway.ts");
+        const no = canBeGateway();
+        if (no) notes.push(`IMESSAGE GATEWAY PROBLEM: ${no}`);
+        else {
+          void new IMessageGateway({ relayUrl: env.MOMO_RELAY_URL, token: env.MOMO_GATEWAY_TOKEN, log: (m) => console.error(m) }).run(stop.signal);
+          notes.push(`iMessage gateway: on (texts to this Mac's Messages are passed to ${env.MOMO_RELAY_URL}, answers are sent from here)`);
+        }
+      }
       if (pc) notes.push(env.MOMO_ASK === "commands" ? "files and commands: full access to this computer (it looks freely; every change asks for your YES)" : "files and commands: full access to this computer (it asks only before deleting, uninstalling or replacing a file; MOMO_ASK=commands makes it ask before every change)");
       if (desktopMode === "local" || pc) notes.push("Private: only the first person to text this Momo can use it.");
       if (telegram instanceof RelayTelegramAdapter) {

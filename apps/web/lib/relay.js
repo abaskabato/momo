@@ -153,9 +153,13 @@ export function operatorConfig(env) {
     model: provider && key ? { name: spec.slice(slash + 1), baseUrl: env.MOMO_MODEL_BASE_URL || provider.baseUrl, key } : null,
     botToken: env.TELEGRAM_BOT_TOKEN || null,
     // An iMessage line from Sendblue: its two API keys and the line's number (what people text).
+    // Or, free: a Mac of the operator's own passes texts through (MOMO_GATEWAY_TOKEN, shared with that Mac,
+    // and MOMO_IMESSAGE_ADDRESS, the phone number or Apple Account email people text).
     imessage: env.SENDBLUE_API_KEY_ID && env.SENDBLUE_API_SECRET_KEY && env.SENDBLUE_NUMBER
       ? { keyId: env.SENDBLUE_API_KEY_ID, secret: env.SENDBLUE_API_SECRET_KEY, number: env.SENDBLUE_NUMBER.trim() }
-      : null,
+      : env.MOMO_GATEWAY_TOKEN && env.MOMO_IMESSAGE_ADDRESS
+        ? { gateway: env.MOMO_GATEWAY_TOKEN, number: env.MOMO_IMESSAGE_ADDRESS.trim() }
+        : null,
     publicUrl: env.MOMO_PUBLIC_URL || (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : null),
   };
 }
@@ -188,6 +192,9 @@ export function operatorConfig(env) {
  *   POST /api/imessage/<secret>      the line's webhook; texting the pairing code links a sender to a device
  *   (their Momo reads /api/inbox and answers with /api/send, exactly as with the bot; the answer
  *    goes wherever the person last texted from)
+ *
+ *   POST /api/gateway/inbound        the operator's Mac (Bearer MOMO_GATEWAY_TOKEN): texts that arrived in Messages
+ *   GET  /api/gateway/outbox         the operator's Mac: answers to send from Messages
  *
  * Shared model key (MOMO_MODEL + key on the server):
  *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
@@ -229,11 +236,37 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
   // The webhook's address carries its own secret: only Sendblue is ever told it.
   let imSecretMemo;
   const imSecret = async () => (imSecretMemo ??= (await sha256(`momo-imessage-webhook:${op.imessage.secret}`)).slice(0, 40));
-  const imSend = (number, content) => sb("send-message", { number, content, from_number: op.imessage.number });
+  const imSend = async (number, content) => {
+    if (!op.imessage.gateway) return sb("send-message", { number, content, from_number: op.imessage.number });
+    // The operator's Mac collects these and sends them from Messages.
+    await store.rpush("gw:outbox", JSON.stringify({ to: number, text: content }), 3600);
+    return { ok: true, status: 200 };
+  };
+
+  /** One text from one person to the line, however it got here. */
+  async function imArrived({ from, text, id, at }, origin) {
+    // A retried delivery is taken once.
+    if (id && (await store.incr(`im:seen:${id}`, 24 * 3600)) > 1) return;
+    const chat = `im:${from}`;
+    // Pairing: the person texts the code from the setup page (the page's link fills it in for them).
+    const code = /^(?:\/?start\s+)?([\w-]{10,16})$/i.exec(text)?.[1];
+    const paired = code && (await store.get(`pair:${code}`));
+    if (paired) {
+      await store.set(`chat:${chat}`, paired);
+      text = "hi";
+    }
+    const dev = await store.get(`chat:${chat}`);
+    if (!dev) {
+      if ((await store.incr(`rl:im:${from}`, 3600)) <= 3) await imSend(from, `This is Momo. To get your own, open ${op.publicUrl || origin} and follow the steps; it takes a few minutes.`);
+      return;
+    }
+    await arrive(dev, chat, { id: `im:${id || randomToken(9)}`, text: text.slice(0, MAX_TEXT), at: at || Date.now() });
+  }
 
   /** The line's number, with its webhook pointed here (registered once per address). */
   async function line(origin) {
     if (!op.imessage) return null;
+    if (op.imessage.gateway) return op.imessage.number; // the Mac calls in; there is no webhook to register
     const hook = `${op.publicUrl || origin}/api/imessage/${await imSecret()}`;
     const key = `im:hook:${await sha256(hook)}`;
     if (!(await store.get(key))) {
@@ -337,29 +370,29 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     }
 
     if (parts[0] === "imessage" && m === "POST") {
-      if (!op.imessage || parts[1] !== (await imSecret())) return json({ error: "not found" }, 404);
+      if (!op.imessage || op.imessage.gateway || parts[1] !== (await imSecret())) return json({ error: "not found" }, 404);
       const u = await body();
       // Only texts from one person to the line: not our own messages echoed back, not group chats.
       const from = typeof u.from_number === "string" ? u.from_number.trim() : "";
       if (u.is_outbound || u.group_id || !from || typeof u.content !== "string" || !u.content.trim()) return json({ ok: true });
-      // Sendblue retries a webhook it thinks failed: the same message is taken once.
-      if (u.message_handle && (await store.incr(`im:seen:${u.message_handle}`, 24 * 3600)) > 1) return json({ ok: true });
-      const chat = `im:${from}`;
-      let text = u.content.trim();
-      // Pairing: the person texts the code from the setup page (the page's link fills it in for them).
-      const code = /^(?:\/?start\s+)?([\w-]{10,16})$/i.exec(text)?.[1];
-      const paired = code && (await store.get(`pair:${code}`));
-      if (paired) {
-        await store.set(`chat:${chat}`, paired);
-        text = "hi";
-      }
-      const dev = await store.get(`chat:${chat}`);
-      if (!dev) {
-        if (!(await limited(`rl:im:${from}`, 3))) await imSend(from, `This is Momo. To get your own, open ${op.publicUrl || url.origin} and follow the steps; it takes a few minutes.`);
+      await imArrived({ from, text: u.content.trim(), id: u.message_handle, at: Date.parse(u.date_sent) }, url.origin);
+      return json({ ok: true });
+    }
+
+    // The operator's Mac: hands over the texts that arrived in Messages, and collects the answers to send.
+    if (parts[0] === "gateway") {
+      if (!op.imessage?.gateway) return json({ error: "not found" }, 404);
+      if (req.headers.get("authorization") !== `Bearer ${op.imessage.gateway}`) return json({ error: "unauthorized" }, 401);
+      if (parts[1] === "inbound" && m === "POST") {
+        const { messages } = await body();
+        for (const x of Array.isArray(messages) ? messages.slice(0, 100) : []) {
+          if (typeof x?.from !== "string" || typeof x?.text !== "string" || !x.from.trim() || !x.text.trim()) continue;
+          await imArrived({ from: x.from.trim(), text: x.text.trim(), id: typeof x.id === "string" ? x.id : undefined, at: Number(x.at) || undefined }, url.origin);
+        }
         return json({ ok: true });
       }
-      await arrive(dev, chat, { id: `im:${u.message_handle || randomToken(9)}`, text: text.slice(0, MAX_TEXT), at: Date.parse(u.date_sent) || Date.now() });
-      return json({ ok: true });
+      if (parts[1] === "outbox" && m === "GET") return json({ messages: (await store.popall("gw:outbox", 50)).map((x) => JSON.parse(x)) });
+      return json({ error: "not found" }, 404);
     }
 
     if (path === "inbox" && m === "GET") {
