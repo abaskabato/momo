@@ -289,7 +289,6 @@ function pickOs(which) {
   os = which;
   awakeNote();
   for (const b of document.querySelectorAll("[data-os]")) b.setAttribute("aria-pressed", String(b.dataset.os === which));
-  $("download").textContent = `Download Momo for ${OS[which].label}`;
 }
 for (const b of document.querySelectorAll("[data-os]")) b.addEventListener("click", () => pickOs(b.dataset.os));
 pickOs(os);

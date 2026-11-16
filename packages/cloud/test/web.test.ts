@@ -314,7 +314,8 @@ test("in a real browser, operator-configured site: no key, no bot; download, ope
     assert.ok(await page.isHidden("#where"), "choices are folded away under Settings");
     await page.click("#settings > summary");
     await page.click("[data-os=windows]");
-    assert.equal(await page.textContent("#download"), "Download Momo for Windows");
+    assert.equal(await page.textContent("#download"), "Try Momo");
+    assert.equal(await page.getAttribute("[data-os=windows]", "aria-pressed"), "true", "the visitor's own computer is picked");
     const [download] = await Promise.all([page.waitForEvent("download"), page.click("#download")]);
     assert.equal(download.suggestedFilename(), "Install Momo.cmd");
     const installer = readFileSync((await download.path())!, "utf8");
