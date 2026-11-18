@@ -64,6 +64,12 @@ to update; your saved logins and settings are kept. Logs are in
      and allow it to control Messages the first time it sends. The Mac must stay on with Messages signed in.
      The site points its webhook at itself and routes each chat to the Momo
      that paired with it. Set `MOMO_PUBLIC_URL` to the site's https address.
+   - `STRIPE_SECRET_KEY` to charge for the shared AI and calls (`vercel integration add stripe`
+     adds it). Each Momo gets a free week from the day it's set up (`MOMO_TRIAL_DAYS`, default 7),
+     then `MOMO_PRICE_CENTS` a month (default 1500, $15). When the week is over, Momo texts its owner a
+     link to Stripe Checkout; once they pay it carries on. The site checks the subscription with Stripe
+     twice a day, so a cancelled one stops by itself, with no webhook to set up. People on their own AI key
+     never pay.
 4. Deploy. The site's home page is the download page.
 
 Costs: every device polls the site for messages (every 1.5 s during a

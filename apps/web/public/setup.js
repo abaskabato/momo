@@ -34,6 +34,12 @@ const ready = fetch("/api/config", { cache: "no-store" }).then((r) => (r.ok ? r.
   const nothing = !!(config.model && (config.bot || config.imessage));
   $("intro-ready").hidden = !nothing;
   $("steps").hidden = nothing;
+  // The shared AI is paid for after a free week; your own key never is.
+  if (nothing && config.price) {
+    const c = config.price.cents;
+    $("price").textContent = `Free for ${config.price.trialDays} days, then $${(c / 100).toFixed(c % 100 ? 2 : 0)} a month. Or use your own AI key, free.`;
+    $("price").hidden = false;
+  }
 });
 
 // --- Step: the AI ---------------------------------------------------------

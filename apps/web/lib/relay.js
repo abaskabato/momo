@@ -45,6 +45,14 @@ const json = (body, status = 200, headers = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...headers } });
 
 const b64u = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+/** A plain page for the person (the end of paying). */
+const page = (text, status = 200) =>
+  new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Momo</title>` +
+      `<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f1ea;color:#1d1b17;font:20px/1.4 system-ui,sans-serif;padding:24px;box-sizing:border-box">` +
+      `<p style="max-width:28em">${text.replace(/[<>&]/g, "")}</p>`,
+    { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+  );
 const randomToken = (n = 32) => b64u(crypto.getRandomValues(new Uint8Array(n)));
 async function sha256(s) {
   return b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))));
@@ -204,6 +212,11 @@ export function operatorConfig(env) {
  *
  * Shared model key (MOMO_MODEL + key on the server):
  *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
+ *
+ * Paying for the shared AI and calls (STRIPE_SECRET_KEY on the server): free for MOMO_TRIAL_DAYS (7), then
+ * MOMO_PRICE_CENTS (1500) a month. Running Momo on your own AI key never touches this.
+ *   GET  /api/pay/<code>             Stripe Checkout for that Momo (the link Momo's owner is texted)
+ *   GET  /api/pay/<code>/done        back from Checkout: the subscription is checked with Stripe and kept
  */
 export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600, phoneCallsPerDay = 20 } = {}) {
   const op = operatorConfig(env);
@@ -297,6 +310,66 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     await store.rpush(`inbox:${dev}`, JSON.stringify({ ...message, from: who }), INBOX_TTL_S);
   }
 
+  // --- Paying for the shared AI and calls -----------------------------------
+  const billing = env.STRIPE_SECRET_KEY
+    ? { key: env.STRIPE_SECRET_KEY, trialMs: Number(env.MOMO_TRIAL_DAYS ?? 7) * 24 * 3600_000, cents: Number(env.MOMO_PRICE_CENTS ?? 1500) }
+    : null;
+  const stripe = async (path, form) => {
+    const r = await f(`${env.STRIPE_API_BASE || "https://api.stripe.com"}/v1/${path}`, {
+      method: form ? "POST" : "GET",
+      headers: { authorization: `Bearer ${billing.key}`, ...(form ? { "content-type": "application/x-www-form-urlencoded" } : {}) },
+      body: form ? new URLSearchParams(form).toString() : undefined,
+    });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(`stripe ${path.split("/")[0]}: ${out.error?.message ?? r.status}`);
+    return out;
+  };
+  /** Text the owner of a Momo through the shared bot or line, if they've paired. */
+  async function tell(dev, text) {
+    const chat = await store.get(`devchat:${dev}`);
+    if (!chat) return;
+    if (chat.startsWith("im:")) { if (op.imessage) await imSend(chat.slice(3), text); return; }
+    if (op.botToken) await tg("sendMessage", { chat_id: chat, text, disable_web_page_preview: true });
+  }
+  /** The link that pays for one Momo (a code of its own, so the device's token never leaves it). */
+  async function payLink(dev, origin) {
+    let code = await store.get(`paycode:${dev}`);
+    if (!code) {
+      code = randomToken(12);
+      await store.set(`paycode:${dev}`, code);
+      await store.set(`pay:${code}`, dev);
+    }
+    return `${op.publicUrl || origin}/api/pay/${code}`;
+  }
+  /** Whether this Momo may use the shared AI and calls: in its free week, or paid up (checked with Stripe twice a day). */
+  async function paidUp(dev) {
+    if (!billing) return true;
+    let since = Number(await store.get(`devat:${dev}`));
+    if (!since) {
+      since = Date.now();
+      await store.set(`devat:${dev}`, String(since));
+    }
+    if (Date.now() - since < billing.trialMs) return true;
+    const sub = await store.get(`sub:${dev}`);
+    if (!sub) return false;
+    if (await store.get(`subok:${dev}`)) return true;
+    try {
+      const s = await stripe(`subscriptions/${encodeURIComponent(sub)}`);
+      if (!["active", "trialing", "past_due"].includes(s.status)) return false;
+    } catch {
+      return true; // Stripe unreachable: don't cut someone off who has paid
+    }
+    await store.set(`subok:${dev}`, "1", 12 * 3600);
+    return true;
+  }
+  const price = () => `$${(billing.cents / 100).toFixed(billing.cents % 100 ? 2 : 0)} a month`;
+  /** The answer when the free week is over: Momo texts its owner this, with the link. */
+  async function payFirst(dev, origin) {
+    const link = await payLink(dev, origin);
+    const text = `Your free week of Momo is over. To keep it going, it's ${price()}, cancel anytime: ${link}`;
+    return json({ error: { message: text, type: "payment_required" }, message: text, pay: link }, 402);
+  }
+
   return async function handle(req) {
     const url = new URL(req.url);
     const path = (url.searchParams.get("p") ?? url.pathname.replace(/^\/(api\/)?/, "")).replace(/^\/|\/$/g, "");
@@ -330,7 +403,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       } catch (e) {
         imError = e.message;
       }
-      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null, ...(op.callsKey ? { calls: true } : {}), ...(op.imessage ? { imessage: im, ...(imError ? { imessageError: imError } : {}) } : {}) });
+      return json({ model: op.model ? { name: op.model.name } : null, bot: b?.username ?? null, ...(op.callsKey ? { calls: true } : {}), ...(billing && (op.model || op.callsKey) ? { price: { cents: billing.cents, trialDays: Math.round(billing.trialMs / 86400_000) } } : {}), ...(op.imessage ? { imessage: im, ...(imError ? { imessageError: imError } : {}) } : {}) });
     }
 
     if (path === "devices" && m === "POST") {
@@ -339,6 +412,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       const token = randomToken();
       const dev = await sha256(token);
       await store.set(`dev:${dev}`, "1");
+      await store.set(`devat:${dev}`, String(Date.now()));
       let pair = null;
       if (op.botToken || op.imessage) {
         pair = randomToken(9);
@@ -433,6 +507,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       if (!op.callsKey) return json({ error: "no shared calling" }, 404);
       const bland = env.BLAND_API_BASE || "https://api.bland.ai/v1";
       if (parts.length === 1 && m === "POST") {
+        if (!(await paidUp(dev))) return payFirst(dev, url.origin);
         // Calls cost the operator by the minute: a daily cap per Momo, and a fixed length.
         if ((await store.incr(`rl:calls:${dev}`, 24 * 3600)) > phoneCallsPerDay) return json({ message: "too many calls today" }, 429);
         const b = await body();
@@ -465,6 +540,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       if (!op.model) return json({ error: "no shared model" }, 404);
       if (parts.slice(1).join("/") !== "v1/chat/completions") return json({ error: "not found" }, 404);
       if (await limited(`rl:model:${dev}`, modelCallsPerHour)) return json({ error: "too many" }, 429);
+      if (!(await paidUp(dev))) return payFirst(dev, url.origin);
       const b = await body();
       if (!Array.isArray(b.messages)) return json({ error: "bad request" }, 400);
       const up = await f(`${op.model.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -473,6 +549,47 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
         body: JSON.stringify({ ...b, model: op.model.name }),
       });
       return new Response(up.body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/json", "cache-control": "no-store" } });
+    }
+
+    // --- Paying -------------------------------------------------------------
+    if (parts[0] === "pay" && m === "GET" && billing) {
+      const code = parts[1] ?? "";
+      const dev = /^[\w-]{12,24}$/.test(code) ? await store.get(`pay:${code}`) : null;
+      if (!dev) return page("That link isn't right. Text Momo and it will send you a new one.", 404);
+      const base = op.publicUrl || url.origin;
+      try {
+        if (parts.length === 2) {
+          const s = await stripe("checkout/sessions", {
+            mode: "subscription",
+            "line_items[0][quantity]": "1",
+            "line_items[0][price_data][currency]": "usd",
+            "line_items[0][price_data][unit_amount]": String(billing.cents),
+            "line_items[0][price_data][recurring][interval]": "month",
+            "line_items[0][price_data][product_data][name]": "Momo",
+            client_reference_id: code,
+            "metadata[pay]": code,
+            "subscription_data[metadata][pay]": code,
+            success_url: `${base}/api/pay/${code}/done?s={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${base}/`,
+          });
+          return new Response(null, { status: 303, headers: { location: s.url, "cache-control": "no-store" } });
+        }
+        if (parts.length === 3 && parts[2] === "done") {
+          const id = url.searchParams.get("s") ?? "";
+          if (!/^cs_[\w]+$/.test(id)) return page("That link isn't right.", 400);
+          const s = await stripe(`checkout/sessions/${id}`);
+          if (s.client_reference_id !== code || s.status !== "complete" || !s.subscription) return page("That payment didn't go through. You can try again from the link Momo sent you.", 402);
+          const first = (await store.get(`sub:${dev}`)) !== s.subscription;
+          await store.set(`sub:${dev}`, s.subscription);
+          await store.set(`subok:${dev}`, "1", 12 * 3600);
+          if (first) await tell(dev, "Thanks, you're all set. Momo is back on: text it anything.").catch(() => {});
+          return page("You're all set. Go back to your messages and text Momo.");
+        }
+      } catch (e) {
+        console.error(e);
+        return page("Payments aren't working right now. Please try again in a few minutes.", 502);
+      }
+      return page("That link isn't right.", 404);
     }
 
     if (parts[0] === "live") return live(parts.slice(1));

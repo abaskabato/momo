@@ -187,7 +187,13 @@ async function chat(s: ModelSpec, fetchImpl: typeof fetch, body: Record<string, 
     await sleep(after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** attempt * 2000, 30_000) * (0.75 + Math.random() / 2));
   }
   if (!res.ok) {
-    const text = (await res.text()).slice(0, 300);
+    const raw = await res.text();
+    // The website's shared AI after the free week: its message (with the link to pay) is what the person reads.
+    if (res.status === 402) {
+      const said = (() => { try { return (JSON.parse(raw) as { message?: string }).message; } catch { return undefined; } })();
+      throw new Error(said && /free week/i.test(said) ? said : `${s.provider} 402: ${raw.slice(0, 300)}`);
+    }
+    const text = raw.slice(0, 300);
     const message = `${s.provider} ${res.status}: ${text}`;
     if (res.status === 413 || (res.status === 400 && /too large|context.{0,12}length|maximum context|too many tokens|reduce (your|the) (message|prompt|length)/i.test(text))) {
       const limit = /limit:?\s*(\d{3,})/i.exec(text)?.[1];

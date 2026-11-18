@@ -654,6 +654,7 @@ export function calendarLink(ev: CalendarEvent, publicUrl?: string): string {
 /** What to text the person when something failed: AI setup problems in plain words, anything else as it is. */
 export function failureText(e: Error): string {
   const m = e.message;
+  if (/^Your free week of Momo is over\b/.test(m)) return m;
   if (/\b(401|403)\b|invalid.*api.?key|unauthorized/i.test(m)) return "I can't reach my AI: its key was refused. Check the key in Momo's settings, then text me again.";
   if (/\b404\b|model.*(not found|does not exist|decommissioned)|unknown model/i.test(m)) return "I can't reach my AI: the model name in Momo's settings doesn't exist. Fix the model name, then text me again.";
   if (/the AI declined to continue/i.test(m)) return `I've stopped this errand: ${m.replace(/^.*?the AI declined/i, "my AI declined")}. Nothing was booked, bought or changed. That's its safety filter, not something you did. Ask me again in different words, or tell me a different way to go about it.`;
