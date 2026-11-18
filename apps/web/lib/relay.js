@@ -377,7 +377,11 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     const m = req.method;
 
     if (path === "ics" && m === "GET") return ics(url.searchParams);
-    if (path === "health") return store ? json({ ok: true }) : json({ ok: false, error: "no storage" }, 503);
+    if (path === "health") {
+      // Whether payments are real ("live"), practice ("test") or off; never the key itself.
+      const payments = billing ? (/^[sr]k_live_/.test(billing.key) ? "live" : /^[sr]k_test_/.test(billing.key) ? "test" : "unrecognised key") : "off";
+      return store ? json({ ok: true, payments }) : json({ ok: false, error: "no storage", payments }, 503);
+    }
     if (!store) return json({ error: "Add Upstash Redis to this Vercel project (Storage tab), then redeploy." }, 503);
 
     const device = async () => {
