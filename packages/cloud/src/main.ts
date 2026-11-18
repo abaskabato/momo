@@ -64,7 +64,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
   const master = env.MOMO_MASTER_KEY;
   if (!master) return null;
-  const { AgentDesktop, createAnswerer, createPlanner, parseModelSpec, LocalPc, VisibleBrowser, everydayBrowsers, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
+  const { AgentDesktop, createAnswerer, createPlanner, isSmallModel, parseModelSpec, LocalPc, VisibleBrowser, everydayBrowsers, DesktopBrowser, DockerComputers, HeadlessBrowser, LocalComputer, RemindersSkill, WebTaskSkill } = await import("@momo/agent-core");
   const { HostedRuntime } = await import("./hosted/runtime.ts");
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
@@ -129,6 +129,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     // Text and done (the default): nothing waits for a YES, except a purchase above MOMO_SPEND_LIMIT (US dollars; "none" lifts it).
     noAsk: !env.MOMO_ASK,
     spendLimit: env.MOMO_SPEND_LIMIT === "none" ? Infinity : Number(env.MOMO_SPEND_LIMIT ?? 200) || 0,
+    // Small and local models get the light loop (short instructions, core tools, small page views). MOMO_LITE=1/0 forces it.
+    lite: env.MOMO_LITE ? env.MOMO_LITE === "1" : isSmallModel(model),
   });
   const runtime = new HostedRuntime({
     redis: kv,
@@ -202,6 +204,8 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           );
         notes.push(`Telegram: text https://t.me/${me.username} (${mode})`);
       }
+      if (env.MOMO_FRONTIER_MODEL && env.MOMO_FRONTIER_MODEL !== model) notes.push(`hybrid: ${model} does each step; ${env.MOMO_FRONTIER_MODEL} takes over when it's stuck and checks before anything final`);
+      if (env.MOMO_LITE ? env.MOMO_LITE === "1" : isSmallModel(model)) notes.push("light mode for a small model: short instructions, core tools, small page views (MOMO_LITE=0 turns it off)");
       notes.push(!env.MOMO_ASK ? `asking: text and done (nothing waits for a YES${env.MOMO_SPEND_LIMIT === "none" ? "" : `, except a purchase over $${Number(env.MOMO_SPEND_LIMIT ?? 200) || 0}`}; MOMO_ASK=money brings the questions back)` : `asking: MOMO_ASK=${env.MOMO_ASK}`);
       notes.push(env.BLAND_API_KEY ? "phone calls: on (Momo can phone businesses)" : env.MOMO_CALLS === "relay" && relay ? `phone calls: on, through ${relay.url} (Momo can phone businesses)` : "phone calls: off (add BLAND_API_KEY to turn them on)");
       if (whatsapp) notes.push(isPublic ? `WhatsApp: webhook ${baseUrl.replace(/\/$/, "")}/v1/hosted/whatsapp` : "WhatsApp needs PUBLIC_URL (https) for its webhook");

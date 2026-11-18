@@ -81,15 +81,15 @@ test("web tools: Enter to search, dropdowns, screenshot, scroll, back; Enter can
   assert.match(snapshotAt, /select\(select-one\) Size \{Small\|Large\}/);
   assert.match(snapshotAt, /input\(checkbox\) Gift \(checked\)/);
   assert.match(results[3]!, /Pressed Enter\. Now at .*\/results\?q=oat\+milk/);
-  assert.equal(results[5], 'Selected "Large".');
+  assert.match(results[5]!, /^Selected "Large"\.\nURL: /, "and the page as it now is");
   assert.match(results[7]!, /^Refused: Enter would submit "Place order"\. Call request_approval first\./);
   assert.equal(orders, 0, "nothing ordered");
   assert.equal(images, 1);
-  assert.match(results[10]!, /Back at http:\/\/127\.0\.0\.1:\d+\/$/);
+  assert.match(results[10]!, /^Back at http:\/\/127\.0\.0\.1:\d+\/\nURL: /, "an action returns the page it led to");
 
   // Only the newest page views are kept in full.
   const pages = lastHistory.flatMap((t) => t.content).filter((b) => b.type === "tool_result").map((b) => (b as { content: unknown }).content);
-  const full = pages.filter((c) => Array.isArray(c) || (typeof c === "string" && c.startsWith("URL: ") && c.length > 600));
+  const full = pages.filter((c) => Array.isArray(c) || (typeof c === "string" && c.includes("<untrusted_page_text>") && c.length > 600));
   assert.equal(full.length, 2);
   assert.ok(pages.some((c) => typeof c === "string" && c.includes("older page view omitted")));
 });

@@ -2,9 +2,11 @@
 // that aren't errands ("what time does Costco close?").
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { Block, Planner, ToolSpec, Turn } from "./agent.ts";
+import type { Block, Planner, Spent, ToolSpec, Turn } from "./agent.ts";
 
 const DEFAULT_MODEL = "claude-opus-5-5";
+
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /** The model's safety filter declined to go on with an errand. */
 export class PlannerRefused extends Error {}
@@ -12,10 +14,14 @@ export class PlannerRefused extends Error {}
 export class ClaudePlanner implements Planner {
   private readonly client: Anthropic;
   private readonly model: string;
+  /** How hard the model thinks at each step. Each step is a small move on a web page, so medium (MOMO_EFFORT to change). */
+  private readonly effort: Effort;
+  readonly spent: Spent = { input: 0, cached: 0, output: 0 };
 
-  constructor(client = new Anthropic(), model = DEFAULT_MODEL) {
+  constructor(client = new Anthropic(), model = DEFAULT_MODEL, effort: Effort = "medium") {
     this.client = client;
     this.model = model;
+    this.effort = effort;
   }
 
   /**
@@ -34,10 +40,22 @@ export class ClaudePlanner implements Planner {
         betas: ["server-side-fallback-2026-07-01", "context-management-2025-06-27", ...(this.dropMismatched ? ["thinking-binding-controls-2026-08-01"] : [])],
         ...(this.dropMismatched && { thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } } as unknown as Anthropic.Beta.BetaThinkingConfigParam }),
         fallbacks: "default",
-        output_config: { effort: "high" },
-        // Server-side clearing of old tool results doesn't count as editing the conversation.
-        context_management: { edits: [{ type: "clear_tool_uses_20250919" }] },
-        system,
+        output_config: { effort: this.effort },
+        // Every step resends the whole errand. The instructions and tools are cached once for all errands
+        // (the marker on the system prompt), and the errand so far is cached step to step (the top-level
+        // marker), so each step pays full price only for what is new.
+        cache_control: { type: "ephemeral" },
+        // Old page views are cleared on the server, which doesn't count as editing the conversation. Each clear
+        // rewrites the cache, so it waits until there is a lot to clear and then clears a lot at once.
+        context_management: {
+          edits: [{
+            type: "clear_tool_uses_20250919",
+            trigger: { type: "input_tokens", value: 50_000 },
+            keep: { type: "tool_uses", value: 4 },
+            clear_at_least: { type: "input_tokens", value: 20_000 },
+          }],
+        },
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
         tools: tools as Anthropic.Beta.BetaTool[],
         // Thinking blocks are passed back unchanged, as the API requires.
         messages: history as Anthropic.Beta.BetaMessageParam[],
@@ -60,6 +78,12 @@ export class ClaudePlanner implements Planner {
         if (turn.role === "assistant") turn.content = turn.content.filter((b) => b.type !== "thinking" && b.type !== "redacted_thinking");
       }
       response = await ask();
+    }
+    const u = response.usage;
+    if (u) {
+      this.spent.input += (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+      this.spent.cached += u.cache_read_input_tokens ?? 0;
+      this.spent.output += u.output_tokens ?? 0;
     }
     // Say in the log when reasoning had to be dropped, and where, so the cause can be found.
     const dropped = (response as unknown as { input_transformations?: Array<{ type: string; path?: string; reason?: string }> }).input_transformations ?? [];

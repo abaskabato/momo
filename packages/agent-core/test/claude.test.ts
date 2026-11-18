@@ -38,7 +38,12 @@ test("Claude: history is not trimmed on this side; a thinking-block mismatch is 
   assert.ok(!bodies[1]!.messages[1]!.content.some((b) => b.type === "thinking"), "then without the thinking blocks");
   assert.ok(bodies[1]!.messages[1]!.content.some((b) => b.type === "tool_use"), "tool calls stay");
   assert.ok(bodies[0]!.betas.includes("context-management-2025-06-27"));
-  assert.deepEqual(bodies[0]!.context_management, { edits: [{ type: "clear_tool_uses_20250919" }] });
+  // Old page views are cleared on the server, in large batches so the cache isn't rewritten every step.
+  assert.deepEqual(bodies[0]!.context_management, { edits: [{ type: "clear_tool_uses_20250919", trigger: { type: "input_tokens", value: 50_000 }, keep: { type: "tool_uses", value: 4 }, clear_at_least: { type: "input_tokens", value: 20_000 } }] });
+  // The instructions and tools are cached across errands, and each errand's history step to step.
+  assert.deepEqual((bodies[0] as unknown as { system: unknown }).system, [{ type: "text", text: "system", cache_control: { type: "ephemeral" } }]);
+  assert.deepEqual((bodies[0] as unknown as { cache_control: unknown }).cache_control, { type: "ephemeral" });
+  assert.deepEqual((bodies[0] as unknown as { output_config: unknown }).output_config, { effort: "medium" });
   // Every request asks the API to drop reasoning that no longer matches, rather than fail the errand.
   assert.ok(bodies[0]!.betas.includes("thinking-binding-controls-2026-08-01"));
   assert.deepEqual((bodies[0] as unknown as { thinking: unknown }).thinking, { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } });

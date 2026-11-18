@@ -125,3 +125,34 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
   books: it stops at every "Reply YES". It needs a paid model key.
 - `npm test` runs the test suite. Some tests use Redis, and the cloud-computer
   test needs the `momo-desktop` image.
+
+## Running on a local model (Ollama)
+
+Momo can run on a model on the owner's own computer, with no AI key and nothing sent to an AI company.
+
+1. Install Ollama (ollama.com) and download a model: `ollama pull qwen3.5:4b`.
+2. In `momo.env`: `MOMO_MODEL=ollama/qwen3.5:4b`.
+
+What Momo does for a local model:
+
+- Talks to Ollama through its own API (`/api/chat`), so it can ask for a 16k-token context window. Ollama's
+  default is 4k on computers with under 24 GB of video memory, which cuts off the start of an errand's
+  instructions. Change it with `MOMO_LOCAL_CONTEXT`.
+- Turns the model's thinking off (`think: false`), which makes small Qwen models several times faster per step.
+  `MOMO_LOCAL_THINK=1` turns it back on.
+- Keeps the model loaded for 30 minutes between steps (`MOMO_LOCAL_KEEP_ALIVE`).
+- Uses the light errand loop: about a quarter of the instructions and tool text, smaller page views, the last
+  page only, and old steps dropped in batches so Ollama can reuse what it already read.
+- Runs a tool call the model wrote out as text (small Qwen models sometimes do this) instead of stopping.
+
+A 4B model can do simple errands but gets lost on long or unusual ones. For those, add a frontier model:
+
+    MOMO_FRONTIER_MODEL=anthropic/claude-opus-5-5
+    ANTHROPIC_API_KEY=...
+
+The local model then does each step, and the frontier model takes over (for three steps) when the local one
+fails, returns something unusable, repeats itself or hits errors twice in a row. The frontier model also makes
+every final step (finishing, approving a purchase, filling a card, placing a call), so "done" is never
+reported on the small model's word alone. Momo's log says each time the frontier model takes over, and at
+the end of each errand how many tokens it used.
+
