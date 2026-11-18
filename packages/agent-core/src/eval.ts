@@ -101,8 +101,11 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Brows
         const c = (b as { content: unknown }).content;
         trace.push(`   -> ${(typeof c === "string" ? c : "(screenshot)").replace(/\s+/g, " ").slice(0, 300)}`);
       }
+      const asked = Date.now();
       const blocks = await planner.next(system, history, specs);
-      for (const b of blocks) if (b.type === "tool_use") trace.push(`${(b as { name: string }).name} ${JSON.stringify((b as { input: unknown }).input).slice(0, 200)}`);
+      // When each step happened, and how long the model took to choose it.
+      const at = `[${Math.round((asked - t0) / 1000)}s, model ${((Date.now() - asked) / 1000).toFixed(1)}s]`;
+      for (const b of blocks) if (b.type === "tool_use") trace.push(`${at} ${(b as { name: string }).name} ${JSON.stringify((b as { input: unknown }).input).slice(0, 200)}`);
       for (const b of blocks) if (b.type === "tool_use") tools.push(String((b as { name: string }).name));
       return blocks;
     },
@@ -201,6 +204,7 @@ if (import.meta.main) {
     process.stdout.write(`${e.id} … `);
     const r = await runErrand(e, planner, browser, { answerer, lite });
     console.log(`${r.outcome} (${r.seconds}s, ${r.steps} steps)`);
+    if (process.env.MOMO_EVAL_TRACE) for (const line of r.trace ?? []) console.log(`  ${line}`);
     results.push(r);
   }
   await browser.dispose();

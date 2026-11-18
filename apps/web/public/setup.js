@@ -4,7 +4,8 @@
 // company that issued it and written into the downloaded installer, never
 // sent to this site.
 const PROVIDERS = [
-  { id: "gemini", label: "Google Gemini (free key available)", keyEnv: "GEMINI_API_KEY", model: "gemini-flash-latest", keyUrl: "https://aistudio.google.com/apikey",
+  { id: "gemini", label: "Google Gemini (free key available)", keyEnv: "GEMINI_API_KEY", model: "gemini-flash-lite-latest", // Flash-Lite: the free tier allows Flash only 20 requests a day, one errand
+    keyUrl: "https://aistudio.google.com/apikey",
     check: (k) => fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(k)}`) },
   { id: "anthropic", label: "Anthropic Claude", keyEnv: "ANTHROPIC_API_KEY", model: "claude-opus-5-5", keyUrl: "https://console.anthropic.com/settings/keys",
     check: (k) => fetch("https://api.anthropic.com/v1/models", { headers: { "x-api-key": k, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" } }) },

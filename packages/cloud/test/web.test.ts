@@ -226,7 +226,7 @@ test("in a real browser, bare site: the page asks for a key and a bot, and makes
     const cspErrors: string[] = [];
     page.on("console", (m) => /Content Security Policy/i.test(m.text()) && cspErrors.push(m.text()));
     // Keys are checked with the provider straight from the browser; stand in for Gemini and Telegram.
-    await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-pro-latest" }] }) }));
+    await page.route("https://generativelanguage.googleapis.com/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [{ name: "models/gemini-flash-latest" }, { name: "models/gemini-flash-lite-latest" }, { name: "models/gemini-pro-latest" }] }) }));
     await page.route("https://api.telegram.org/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, result: { username: "ana_momo_bot" } }) }));
     await page.goto(base);
     await page.getByRole("heading", { name: /Consider it done/ }).waitFor();

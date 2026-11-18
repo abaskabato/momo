@@ -23,7 +23,7 @@ export interface Provider {
 }
 
 export const PROVIDERS: Provider[] = [
-  { id: "gemini", label: "Google Gemini (free key available)", keyEnv: "GEMINI_API_KEY", defaultModel: "gemini-flash-latest", keyUrl: "https://aistudio.google.com/apikey" },
+  { id: "gemini", label: "Google Gemini (free key available)", keyEnv: "GEMINI_API_KEY", defaultModel: "gemini-flash-lite-latest", keyUrl: "https://aistudio.google.com/apikey" },
   { id: "anthropic", label: "Anthropic Claude", keyEnv: "ANTHROPIC_API_KEY", defaultModel: "claude-opus-5-5", keyUrl: "https://console.anthropic.com/settings/keys" },
   { id: "openai", label: "OpenAI", keyEnv: "OPENAI_API_KEY", keyUrl: "https://platform.openai.com/api-keys" },
   { id: "openrouter", label: "OpenRouter (hundreds of models)", keyEnv: "OPENROUTER_API_KEY", keyUrl: "https://openrouter.ai/keys" },
