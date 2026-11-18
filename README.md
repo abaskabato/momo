@@ -6,18 +6,28 @@ You text Momo on Telegram (or WhatsApp) in plain language: "book a table for 4
 at Nopa Friday at 7", "order more oat milk", "remind me to call mom at 6". It
 does the errand on websites, and, if you let it, in any app on your computer,
 like a person at the screen (through
-[agent-desktop](https://github.com/vercel-labs/agent-desktop)). Before it buys,
-books, sends or deletes anything, it texts you the exact terms and waits for
-your YES. `STOP` cancels everything. `UNDO` reverses the last thing it did.
+[agent-desktop](https://github.com/vercel-labs/agent-desktop)). It does the
+errand, then texts you exactly what it did. The one thing it checks with you
+first is a purchase over your spending limit ($200 unless you change it).
+`STOP` cancels everything. `UNDO` reverses the last thing it did.
+
+## Use it, or run it yourself
+
+- **[textmomo.app](https://textmomo.app)**: download Momo and start texting.
+  The hosted service supplies what's fiddly to set up yourself (the AI, a
+  shared bot and iMessage number, phone calls, secure links).
+- **Run it yourself**: everything here is open source under the AGPL. Bring
+  your own AI key (or a local model through Ollama) and your own Telegram bot.
 
 ## Quick start
 
-People set Momo up on its website (`apps/web`, deployed on Vercel), then paste
-one line that installs it on their own computer as a background service:
+People set Momo up on its website ([textmomo.app](https://textmomo.app), from
+`apps/web`), which downloads one file that installs it on their own computer
+as a background service. Or, with your own deployment of the site:
 
 ```bash
-curl -fsSL https://your-momo.vercel.app/install.sh | sh   # Mac, Linux
-irm https://your-momo.vercel.app/install.ps1 | iex        # Windows
+curl -fsSL https://your-momo.example/install.sh | sh   # Mac, Linux
+irm https://your-momo.example/install.ps1 | iex        # Windows
 ```
 
 Or by hand, for developers:
@@ -62,9 +72,10 @@ what's measured, and what isn't.
   business, add to calendar, ask, request approval, finish.
 - **Computer use**: with `MOMO_DESKTOP=local` Momo drives apps on the owner's
   screen through agent-desktop's accessibility tree; with `cloud` it gets a
-  fresh Linux desktop container per errand. Sending, deleting and other
-  irreversible actions still need a YES.
-- **Confirm-before-commit**: approvals are bound to a hash of the exact
+  fresh Linux desktop container per errand. By default it acts and reports what
+  it did; `MOMO_ASK=money` makes sending, buying and deleting wait for a YES.
+- **Approvals** (a purchase over the spending limit, or anything `MOMO_ASK`
+  asks about): approvals are bound to a hash of the exact
   arguments plus the amount, are single-use, and expire in 15 minutes. They
   are parsed by code, so a model, a web page or an email can't approve.
 - **Secrets**: never in chat. Logins, cards and addresses arrive by secure
@@ -76,6 +87,9 @@ what's measured, and what isn't.
   `lmstudio/…`, or `custom/…` for any OpenAI-compatible server
   (`MOMO_MODEL_BASE_URL`, `MOMO_MODEL_API_KEY`). `MOMO_ANSWER_MODEL` can pick
   a cheaper model for plain questions. Rate limits and overloads are retried.
+  Small and local models get a lighter loop; with `MOMO_FRONTIER_MODEL` set, a
+  local model does each step and the frontier model takes the ones beyond it
+  (see [docs/SETUP.md](docs/SETUP.md#running-on-a-local-model-ollama)).
 
 ## On a server, for many people
 
@@ -119,7 +133,7 @@ Node 24+ (native TypeScript, no build step). Redis only for the server tests.
 ```bash
 npm install
 npm run typecheck
-npm test                      # 52 tests: unit, relay, real browser, end-to-end errands
+npm test                      # 97 tests: unit, relay, real browser, end-to-end errands
 npm run web                   # the website at http://localhost:3000, relay in memory
 npm run web:assets            # regenerate apps/web/public/form-copy.js after changing the forms
 node packages/agent-core/src/cli.ts demo   # chat with it against a local booking site
@@ -136,3 +150,9 @@ packages/openclaw-plugin  Optional adapter for running the agent inside OpenClaw
 desktop/, Dockerfile*     Docker images: the server, and a Linux desktop for cloud computer use
 docs/                     SETUP.md, INSTINCT-SCORECARD.md, evals
 ```
+
+## License
+
+Momo is free software under the [GNU Affero General Public License v3.0](LICENSE):
+use it, change it and share it. If you run a modified Momo as a service for
+other people, you must offer them your changes' source code too.
