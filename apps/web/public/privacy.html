@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Momo privacy</title>
+<meta name="description" content="What Momo keeps, where, and who else sees it.">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/home.css">
+<link rel="stylesheet" href="/legal.css">
+</head>
+<body class="home">
+<header class="site">
+  <a href="/" class="wordmark"><i class="box on" aria-hidden="true"></i>momo</a>
+  <nav><a href="https://github.com/abaskabato/momo" rel="noopener">Source</a></nav>
+</header>
+<main class="doc">
+<h1>Privacy</h1>
+<p class="updated">Draft, last updated November 18, 2026</p>
+
+<div class="short">
+<p><strong>The short version.</strong> Momo runs on your own computer, and what it knows about you stays there, encrypted. We (Blackfish Ventures, which makes Momo) don't sell your data, don't show you ads and don't track you. Some things have to pass through other companies for Momo to work: the AI that reads the page, the messaging app you text from, and Stripe if you pay. This page lists every one.</p>
+</div>
+
+<h2>What stays on your computer</h2>
+<ul>
+  <li>Your conversations with Momo, what it remembers about you, and the errands it has done.</li>
+  <li>Logins, card details and addresses you give it. They're encrypted and typed straight into the website that needs them. The AI only ever sees a placeholder, never the password or card number.</li>
+  <li>Momo's own browser. Momo copies your everyday browser's sign-ins (cookies and saved passwords) into its own browser profile on the same computer, so it doesn't have to log in again. That copy never leaves your computer.</li>
+</ul>
+<p>All of this lives in a folder called <code>.momo</code> in your home folder. Delete the folder and it's gone; we have no copy.</p>
+
+<h2>What passes through other companies</h2>
+<table>
+  <thead><tr><th>Who</th><th>What they see</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>The AI provider</td><td>Your request, and the text of the web pages Momo reads while doing it. Never your passwords or card numbers.</td><td>The AI decides each step. If you use your own key, it's whichever provider you chose. If you use Momo's shared AI, it's the provider we use, reached through textmomo.app. If you run a local model (Ollama), nothing leaves your computer.</td></tr>
+    <tr><td>Telegram, or Apple iMessage</td><td>The texts between you and Momo.</td><td>That's how you talk to it. Their own privacy policies apply.</td></tr>
+    <tr><td>textmomo.app (us)</td><td>See below.</td><td>Setup, the shared bot and AI, and secure links.</td></tr>
+    <tr><td>Bland AI</td><td>The business's phone number and what to say, and the call's transcript.</td><td>Only when Momo phones a business for you.</td></tr>
+    <tr><td>Stripe</td><td>Your card and billing details. We never see your card number.</td><td>Only if you pay for Momo.</td></tr>
+    <tr><td>Websites Momo visits</td><td>What any visitor's browser would show them, plus what you asked Momo to enter.</td><td>Doing the errand.</td></tr>
+  </tbody>
+</table>
+
+<h2>What textmomo.app keeps, and for how long</h2>
+<ul>
+  <li><strong>Your Momo's ID.</strong> A random code for your Momo, stored only as a scrambled (hashed) form, and the date it was set up (for the free week).</li>
+  <li><strong>Texts on their way.</strong> If you use the shared bot or iMessage line, your texts wait on our server until your Momo collects them, usually within seconds and never more than a day. We also keep which chat belongs to which Momo, so answers reach you.</li>
+  <li><strong>Secure links.</strong> When you send a password or card through a Momo link, your phone's browser locks it so only your Momo can open it. We hold the locked version for at most 30 minutes, and we can't read it.</li>
+  <li><strong>Live view.</strong> When Momo needs you to tap through a check like a CAPTCHA, screenshots of that one page pass through us and are kept for about 20 seconds.</li>
+  <li><strong>The shared AI.</strong> Requests pass through us to the AI provider and the answers come straight back. We don't store them.</li>
+  <li><strong>Payment.</strong> Your Stripe subscription ID, so we know you've paid.</li>
+  <li><strong>Pairing codes</strong> last 7 days. Rate-limit counters last an hour or a day.</li>
+</ul>
+<p>Our host (Vercel) keeps standard request logs, such as addresses and times, for a short period. We don't use analytics or tracking cookies, and the site sets no cookies at all.</p>
+
+<h2>Running it yourself</h2>
+<p>Momo is open source. If you run it with your own AI key and your own Telegram bot, nothing goes through textmomo.app after you download it, apart from secure links and live view if you use them.</p>
+
+<h2>Your choices</h2>
+<ul>
+  <li>Delete the <code>.momo</code> folder to remove everything Momo knows.</li>
+  <li>To have us delete what textmomo.app holds about your Momo (its ID, chat link and subscription record), <a href="https://github.com/abaskabato/momo/issues">contact us</a>.</li>
+  <li>We don't sell or share your information for advertising, and we never will.</li>
+</ul>
+
+<h2>Changes</h2>
+<p>If this policy changes, we'll update this page and its date, and tell you before a change that matters.</p>
+
+<h2>Contact</h2>
+<p>Momo is made by Blackfish Ventures. Questions: <a href="https://github.com/abaskabato/momo/issues">github.com/abaskabato/momo/issues</a>.</p>
+</main>
+<footer class="legal">
+  <a href="/">Home</a> <a href="/terms.html">Terms</a> <a href="https://github.com/abaskabato/momo" rel="noopener">Source</a>
+</footer>
+</body>
+</html>

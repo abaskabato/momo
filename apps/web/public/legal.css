@@ -1,0 +1,14 @@
+/* The privacy and terms pages: one readable column on the home page's paper. */
+body.home main.doc { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; box-sizing: border-box; }
+body.home main.doc h1 { font: 600 clamp(32px, 6vw, 44px)/1.1 var(--serif); letter-spacing: -0.02em; margin: 24px 0 8px; }
+body.home main.doc .updated { color: var(--mut); font: 400 14px/1.4 var(--serif); margin: 0 0 28px; }
+body.home main.doc .short { border-left: 3px solid var(--pen); padding: 4px 0 4px 16px; margin: 0 0 32px; }
+body.home main.doc h2 { font: 600 20px/1.3 var(--serif); margin: 36px 0 8px; }
+body.home main.doc p, body.home main.doc li { font: 400 17px/1.6 var(--serif); }
+body.home main.doc ul { padding-left: 20px; }
+body.home main.doc li { margin: 6px 0; }
+body.home main.doc a { color: var(--fg); text-decoration-color: var(--pen); text-underline-offset: 3px; }
+body.home main.doc table { border-collapse: collapse; width: 100%; font: 400 15px/1.45 var(--serif); margin: 12px 0; }
+body.home main.doc th, body.home main.doc td { text-align: left; vertical-align: top; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); }
+body.home main.doc th { font-weight: 600; }
+@media (max-width: 520px) { body.home main.doc table, body.home main.doc tbody, body.home main.doc tr, body.home main.doc td, body.home main.doc th { display: block; } body.home main.doc thead { display: none; } body.home main.doc td:first-child { font-weight: 600; border-bottom: 0; padding-bottom: 0; } }
