@@ -19,7 +19,7 @@ import { parseArgs } from "node:util";
 import { HeadlessBrowser, type BrowserSessionFactory } from "./browser.ts";
 import type { ComputerFactory } from "./computer.ts";
 import { RecordingOutbound } from "./channels.ts";
-import { createAnswerer, createPlanner, type Answerer } from "./llm.ts";
+import { createAnswerer, createPlanner, type Answerer, isSmallModel } from "./llm.ts";
 import { createAgent } from "./runtime.ts";
 import type { Doc } from "./store.ts";
 import { StaticKeyProvider } from "./vault.ts";
@@ -83,6 +83,8 @@ export interface RunOptions {
   /** A computer for non-web errands (agent-desktop). */
   computers?: ComputerFactory;
   timeoutMs?: number;
+  /** The light loop Momo uses for small and local models. */
+  lite?: boolean;
 }
 
 export async function runErrand(errand: Errand, planner: Planner, browser: BrowserSessionFactory, o: RunOptions = {}): Promise<EvalResult> {
@@ -109,7 +111,7 @@ export async function runErrand(errand: Errand, planner: Planner, browser: Brows
   const agent = await createAgent({
     docs: (_n, fallback) => new MemDoc(fallback),
     keyProvider: new StaticKeyProvider(randomBytes(32)),
-    skills: () => [new WebTaskSkill(counting, browser, computers)],
+    skills: () => [new WebTaskSkill(counting, browser, computers, undefined, { lite: o.lite })],
     outbound: out,
     ownerHandles: ["eval"],
     onboarding: "done",
@@ -189,12 +191,15 @@ if (import.meta.main) {
     (e) => !values.only || values.only.split(",").includes(e.id),
   );
   const planner = createPlanner(model);
+  // As Momo itself does: small and local models get the light loop (MOMO_LITE=1/0 overrides).
+  const lite = process.env.MOMO_LITE ? process.env.MOMO_LITE === "1" : isSmallModel(model);
+  if (lite) console.log(`${model}: light mode`);
   const answerer = createAnswerer(process.env.MOMO_ANSWER_MODEL ?? model);
   const browser = new HeadlessBrowser({ timezoneId: "America/Los_Angeles" });
   const results: EvalResult[] = [];
   for (const e of errands) {
     process.stdout.write(`${e.id} … `);
-    const r = await runErrand(e, planner, browser, { answerer });
+    const r = await runErrand(e, planner, browser, { answerer, lite });
     console.log(`${r.outcome} (${r.seconds}s, ${r.steps} steps)`);
     results.push(r);
   }
