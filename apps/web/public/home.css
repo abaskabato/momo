@@ -82,6 +82,7 @@ body.home header.site nav a:hover, body.home footer.legal a:hover { color: var(-
 .box.on::after,
 .todo .box::after,
 .steps section.step:has(.note.ok) .box::after { transform: rotate(40deg) scale(1); opacity: 1; }
+.wordmark img { display: block; width: 26px; height: 26px; }
 .wordmark .box { width: 16px; height: 16px; border-radius: 5px; }
 .wordmark .box::after { left: 4px; top: -4px; width: 7px; height: 14px; border-width: 0 2.5px 2.5px 0; }
 
@@ -93,6 +94,28 @@ main.home { padding-top: clamp(40px, 9vh, 96px); padding-bottom: 48px; }
   margin: 0 0 clamp(22px, 4vh, 34px);
 }
 .page h1 b { font-weight: inherit; color: var(--pen); }
+
+/* Momo itself, beside the headline: it hops once as each line is ticked, then floats. */
+.page .hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.page .hero h1 { flex: 1 1 auto; min-width: 0; }
+.page .hero .mascot {
+  flex: none;
+  width: clamp(84px, 21vw, 190px);
+  height: auto;
+  margin: 0 0 clamp(22px, 4vh, 34px);
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 10px 14px rgba(240, 67, 28, 0.18));
+  animation: hop 0.5s ease-out 0.6s, hop 0.5s ease-out 1.3s, hop 0.5s ease-out 2s, hop 0.5s ease-out 2.7s, float 4.5s ease-in-out 3.4s infinite;
+}
+@keyframes hop {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  20% { transform: translateY(0) scale(1.06, 0.92); }
+  55% { transform: translateY(-14%) scale(0.96, 1.05) rotate(-4deg); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50% { transform: translateY(-5%) rotate(2deg); }
+}
 .page p.lede {
   font: 400 clamp(19px, 2.6vw, 23px) / 1.35 var(--serif);
   letter-spacing: -0.02em;
@@ -196,4 +219,5 @@ body.home footer.legal { padding-top: 32px; padding-bottom: 32px; }
 @media (prefers-reduced-motion: reduce) {
   .todo s { animation: none; background-size: 100% 1.5px; color: var(--mut); }
   .todo .box::after { animation: none; }
+  .page .hero .mascot { animation: none; }
 }

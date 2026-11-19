@@ -13,7 +13,7 @@ const RULES = JSON.parse(await readFile(new URL("./vercel.json", import.meta.url
   headers: Object.fromEntries(h.headers.map((x) => [x.key, x.value])),
 }));
 const vercelHeaders = (path) => Object.assign({}, ...RULES.filter((r) => r.re.test(path)).map((r) => r.headers));
-const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".sh": "text/plain; charset=utf-8", ".ps1": "text/plain; charset=utf-8" };
+const TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".sh": "text/plain; charset=utf-8", ".ps1": "text/plain; charset=utf-8", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
 
 export function startDev(port = 3000, relay = createRelay(memoryStore())) {
   const server = createServer(async (req, res) => {
