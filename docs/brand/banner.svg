@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 260" role="img" aria-label="Momo: text it and it's done">
+  <title>Momo: text it and it's done</title>
+  <rect width="880" height="260" rx="28" fill="#f4f1ea"/>
+  <svg x="40" y="20" width="220" height="220" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="skin" cx="34%" cy="30%" r="80%">
+      <stop offset="0" stop-color="#ffc49e"/>
+      <stop offset="0.45" stop-color="#ff8a5c"/>
+      <stop offset="1" stop-color="#f0431c"/>
+    </radialGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5fbf73"/>
+      <stop offset="1" stop-color="#1f7a3d"/>
+    </linearGradient>
+  </defs>
+  <!-- stem and leaf -->
+  <path d="M100 56 C102 44 106 34 113 26" fill="none" stroke="#6b3d1f" stroke-width="6" stroke-linecap="round"/>
+  <path d="M112 30 C122 10 152 8 166 18 C156 38 128 46 112 30 Z" fill="url(#leaf)"/>
+  <path d="M116 29 C130 24 146 20 160 19" fill="none" stroke="#ffffff" stroke-opacity=".45" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- the peach, which is also a text bubble (its tail bottom left) -->
+  <path d="M100 56 C128 30 178 42 180 98 C182 146 148 176 106 177 Q84 177 68 171 L42 188 L52 160 C30 142 20 120 21 97 C23 46 72 30 100 56 Z" fill="url(#skin)"/>
+  <!-- the peach's crease -->
+  <path d="M100 58 C90 70 88 84 92 96" fill="none" stroke="#c8331a" stroke-opacity=".45" stroke-width="4" stroke-linecap="round"/>
+  <!-- a soft shine -->
+  <ellipse cx="58" cy="78" rx="13" ry="8" transform="rotate(-35 58 78)" fill="#ffffff" fill-opacity=".45"/>
+  <!-- face: eyes, cheeks, and a smile that's a tick: done -->
+  <circle cx="80" cy="112" r="8.5" fill="#141412"/>
+  <circle cx="130" cy="112" r="8.5" fill="#141412"/>
+  <circle cx="83" cy="109" r="2.8" fill="#ffffff"/>
+  <circle cx="133" cy="109" r="2.8" fill="#ffffff"/>
+  <ellipse cx="64" cy="132" rx="10" ry="6" fill="#ff5f7e" fill-opacity=".45"/>
+  <ellipse cx="148" cy="132" rx="10" ry="6" fill="#ff5f7e" fill-opacity=".45"/>
+  <path d="M93 134 L103 144 L122 124" fill="none" stroke="#141412" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <text x="290" y="140" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="104" font-weight="800" letter-spacing="-3" fill="#141412">momo</text>
+  <text x="294" y="192" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="30" fill="#77736a">Text it and it's done.</text>
+</svg>

@@ -1,23 +1,67 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/banner-dark.svg">
+    <img src="docs/brand/banner.svg" alt="Momo: text it and it's done" width="640">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://www.textmomo.app"><b>textmomo.app</b></a> ·
+  <a href="docs/SETUP.md">Run it yourself</a> ·
+  <a href="https://www.textmomo.app/privacy.html">Privacy</a> ·
+  <a href="CHANGELOG.md">What's new</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-f0431c"></a>
+  <img alt="Node 24+" src="https://img.shields.io/badge/node-24%2B-1f7a3d">
+  <img alt="Runs on Mac, Windows and Linux" src="https://img.shields.io/badge/runs%20on-Mac%20%C2%B7%20Windows%20%C2%B7%20Linux-141412">
+</p>
+
 # Momo
 
-Text it and it's done.
+**A personal assistant you text, that does the errand instead of telling you how.**
+It runs on your own computer, so what it knows about you stays there.
 
-You text Momo on Telegram (or WhatsApp) in plain language: "book a table for 4
-at Nopa Friday at 7", "order more oat milk", "remind me to call mom at 6". It
-does the errand on websites, and, if you let it, in any app on your computer,
-like a person at the screen (through
-[agent-desktop](https://github.com/vercel-labs/agent-desktop)). It does the
-errand, then texts you exactly what it did. The one thing it checks with you
-first is a purchase over your spending limit ($200 unless you change it).
-`STOP` cancels everything. `UNDO` reverses the last thing it did.
+| You text | Momo |
+|---|---|
+| book a table for 4 at Nopa Friday at 7 | Books it on the restaurant's site, then texts you the confirmation. |
+| order more oat milk | Orders it, and tells you what it cost and when it arrives. |
+| what time does the Costco on 10th close today? | Looks it up live. It never answers from memory. |
+| call the dentist and get me on the cancellation list | Phones them. If they ask something only you know, it texts you and passes your answer on. |
+| remind me to call mom at 6 | Texts you at 6. |
+
+You text it on Telegram or iMessage in plain language. It does the errand on
+websites, on the phone, and, if you let it, in any app on your computer, then
+texts you exactly what it did. It doesn't ask "are you sure?": the one thing it
+checks with you first is a purchase over your spending limit ($200 unless you
+change it). `STOP` cancels everything. `UNDO` reverses the last thing it did.
+
+## Private by design
+
+- **It lives on your computer.** Your conversations, what it remembers about
+  you, and its browser stay in one folder on your computer (`~/.momo`), with
+  what it knows about you encrypted. Delete the folder and it's gone; there's
+  no copy of it anywhere else.
+- **Secrets never go through chat.** Logins, cards and addresses arrive by a
+  secure link that your phone's browser locks to your Momo. They're typed
+  straight into the website that needs them, and the AI only ever sees a
+  placeholder.
+- **You choose the AI.** Use your own key from any provider, the hosted AI, or
+  a local model through Ollama, in which case nothing leaves your computer for
+  the AI at all.
+- **No ads, no tracking, open source.** Every claim here can be checked in
+  this repository. The [privacy policy](https://www.textmomo.app/privacy.html)
+  lists every company your data passes through, and why.
 
 ## Use it, or run it yourself
 
-- **[textmomo.app](https://textmomo.app)**: download Momo and start texting.
-  The hosted service supplies what's fiddly to set up yourself (the AI, a
-  shared bot and iMessage number, phone calls, secure links).
-- **Run it yourself**: everything here is open source under the AGPL. Bring
-  your own AI key (or a local model through Ollama) and your own Telegram bot.
+- **[textmomo.app](https://www.textmomo.app)**: set up in a few minutes, no
+  terminal. The hosted service supplies what's fiddly to set up yourself (the
+  AI, a shared bot and iMessage number, phone calls, secure links). The first
+  week is free, then it's $15 a month.
+- **Run it yourself, free**: everything here is open source under the AGPL.
+  Bring your own AI key (or a local model) and your own Telegram bot.
 
 ## Quick start
 
@@ -105,7 +149,8 @@ With a public https address the server registers the Telegram webhook itself,
 serves secure links and live views directly (no relay), and can take WhatsApp
 (`/v1/hosted/whatsapp`), phone-call results and inbound email:
 
-- `BLAND_API_KEY`: Momo phones businesses that can't be booked online.
+- `BLAND_API_KEY`: Momo phones businesses that can't be booked online
+  (`BLAND_FROM` + `BLAND_TWILIO_KEY` to call from your own number).
 - `MOMO_EMAIL_DOMAIN` + `INBOUND_EMAIL_SECRET`: every user gets a Momo email
   address. Point the domain's MX at any inbound-email service (Postmark,
   SendGrid Inbound Parse, Mailgun, a Cloudflare Email Worker) posting to
@@ -133,7 +178,7 @@ Node 24+ (native TypeScript, no build step). Redis only for the server tests.
 ```bash
 npm install
 npm run typecheck
-npm test                      # 97 tests: unit, relay, real browser, end-to-end errands
+npm test                      # unit, relay, real browser and end-to-end errand tests
 npm run web                   # the website at http://localhost:3000, relay in memory
 npm run web:assets            # regenerate apps/web/public/form-copy.js after changing the forms
 node packages/agent-core/src/cli.ts demo   # chat with it against a local booking site
@@ -148,7 +193,7 @@ packages/agent-core       Assistant, skills (web agent, reminders), browser, com
 packages/cloud            Momo server: Telegram/WhatsApp, job queue (file or Redis), secure pages, setup wizard
 packages/openclaw-plugin  Optional adapter for running the agent inside OpenClaw
 desktop/, Dockerfile*     Docker images: the server, and a Linux desktop for cloud computer use
-docs/                     SETUP.md, INSTINCT-SCORECARD.md, evals
+docs/                     SETUP.md, INSTINCT-SCORECARD.md, evals, brand (the logo)
 ```
 
 ## Security and changes
