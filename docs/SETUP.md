@@ -157,7 +157,8 @@ Anyone who texts before it's done is told it's still downloading. With a frontie
 model answers in the meantime.
 
 On a person's own computer, Momo's local web server (port 8787) only accepts connections from that computer,
-so nothing else on the same wifi can reach it. A server for many people (with `REDIS_URL` or `PUBLIC_URL`)
+so nothing else on the same wifi can reach it, and it only takes requests from Momo's own pages, so other
+websites open in the owner's browser can't use it either. A server for many people (with `REDIS_URL` or `PUBLIC_URL`)
 listens on every address. `MOMO_LISTEN` overrides either.
 
 What Momo does for a local model:

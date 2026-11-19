@@ -202,6 +202,7 @@ async function settings() {
   if (!limit) lines.push("MOMO_SPEND_LIMIT=none");
   else if (Number(limit) !== 200) lines.push(`MOMO_SPEND_LIMIT=${Number(limit)}`);
   if ($("awake").value === "always") lines.push("MOMO_MAINTENANCE=off");
+  if ($("awake").value === "lid") lines.push("MOMO_MAINTENANCE=off", "MOMO_LID=awake");
   if ($("awake").value === "off") lines.push("MOMO_AWAKE=off");
   if ($("bland").value.trim()) lines.push(`BLAND_API_KEY=${$("bland").value.trim()}`);
   else if (config.calls && relay) lines.push("MOMO_CALLS=relay"); // the site places calls; nothing to sign up for
@@ -287,6 +288,11 @@ function awakeNote() {
       ? "Momo stops this computer from going to sleep, so a text is answered at any hour; the screen still turns off. From 3 to 5 at night it lets go, so Windows can sleep, update or restart, and the computer wakes itself at 5. A laptop still sleeps when its lid is closed."
       : "Momo stops this computer from going to sleep, so a text is answered at any hour; the screen still turns off. The nightly rest is for Windows only: this computer couldn't wake itself afterwards, so it stays awake. A laptop still sleeps when its lid is closed.",
     always: "Momo stops this computer from going to sleep at any hour; the screen still turns off. A laptop still sleeps when its lid is closed.",
+    lid: os === "mac"
+      ? "A Mac can't be kept awake with its lid closed without an administrator's password, so Momo keeps it awake around the clock and a closed lid still sleeps. Plug in a screen and a closed Mac stays awake by itself."
+      : os === "windows"
+        ? "Momo keeps this computer awake at any hour, and while it's plugged in, closing the lid doesn't put it to sleep. On battery a closed lid still sleeps, so it won't overheat in a bag. Your usual setting comes back when Momo stops."
+        : "Momo keeps this computer awake at any hour, also with the lid closed.",
     off: "Momo leaves the computer alone. Texts sent while it sleeps are answered when it wakes.",
   }[$("awake").value];
 }

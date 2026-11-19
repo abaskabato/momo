@@ -165,7 +165,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   // On a person's own computer: hold it awake so texts are always answered (MOMO_AWAKE=off to leave it be),
   // with a nightly rest where the computer can wake itself again (MOMO_MAINTENANCE=03:00-05:00).
   const awake = isPublic || env.REDIS_URL ? undefined : awakeFromEnv(env); // a server never sleeps
-  const keepAwake = awake?.on ? new KeepAwake({ window: awake.window, busy: () => runtime.busy, log: (m) => console.error(m) }) : undefined;
+  const keepAwake = awake?.on ? new KeepAwake({ window: awake.window, lid: awake.lid, lidFile: join(env.MOMO_HOME ?? join(homedir(), ".momo"), "lid-setting.txt"), busy: () => runtime.busy, log: (m) => console.error(m) }) : undefined;
   return {
     runtime,
     model,
@@ -282,6 +282,11 @@ if (import.meta.main) {
   if (hosted && !redisUrl) {
     const { Hono } = await import("hono");
     const device = new Hono();
+    // Only this computer, and not websites open in its browser (see hosted/guard.ts).
+    if (!process.env.MOMO_LISTEN && !process.env.PUBLIC_URL) {
+      const { localOnly } = await import("./hosted/guard.ts");
+      device.use("*", localOnly(port));
+    }
     device.get("/healthz", (c) => c.json({ ok: true }));
     device.route("/", hosted.runtime.routes());
     app = device;

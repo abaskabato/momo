@@ -106,3 +106,22 @@ test("settings: on by default; the window only where the computer wakes itself; 
   assert.match(mac.note, /can't wake itself/);
   assert.equal(awakeFromEnv({ MOMO_AWAKE: "off" }, "win32").on, false);
 });
+
+test("MOMO_LID=awake: Windows ignores the lid while plugged in and puts its setting back; Linux holds the lid switch; a Mac is left be", () => {
+  const win = holdCommand("win32", 42, true, "C:\\Users\\a\\.momo\\lid-setting.txt")!.args.at(-1)!;
+  // Remembers the setting first (or keeps one remembered from a run that was cut off), then changes it, then holds.
+  assert.match(win, /\$f = 'C:\\Users\\a\\\.momo\\lid-setting\.txt'; \$was = if \(Test-Path \$f\) \{ Get-Content \$f \} else \{ .*LIDACTION.*\}; if \(\$was\) \{ Set-Content \$f \$was; powercfg \/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0;/);
+  assert.ok(!/setdcvalueindex/.test(win), "on battery, a closed lid still sleeps");
+  // ...and when Momo goes away (its stdin closes), puts it back and forgets it.
+  assert.match(win, /ReadLine\(\); if \(\$was\) \{ powercfg \/setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION \(\[Convert\]::ToInt32\(\$was, 16\)\); powercfg \/setactive SCHEME_CURRENT; Remove-Item \$f \}$/);
+  assert.ok(!/LIDACTION/.test(holdCommand("win32", 42)!.args.join(" ")), "off unless asked");
+  assert.ok(holdCommand("linux", 42, true)!.args.includes("--what=sleep:idle:handle-lid-switch"));
+  assert.ok(holdCommand("linux", 42)!.args.includes("--what=sleep:idle"));
+  assert.deepEqual(holdCommand("darwin", 42, true), { cmd: "caffeinate", args: ["-i", "-s", "-w", "42"] });
+
+  assert.equal(awakeFromEnv({ MOMO_LID: "awake" }, "win32").lid, true);
+  assert.match(awakeFromEnv({ MOMO_LID: "awake" }, "win32").note, /lid closed too while plugged in/);
+  assert.equal(awakeFromEnv({ MOMO_LID: "awake" }, "darwin").lid, false);
+  assert.match(awakeFromEnv({ MOMO_LID: "awake" }, "darwin").note, /needs an administrator/);
+  assert.equal(awakeFromEnv({}, "linux").lid, false);
+});

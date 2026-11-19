@@ -151,6 +151,11 @@ desktop/, Dockerfile*     Docker images: the server, and a Linux desktop for clo
 docs/                     SETUP.md, INSTINCT-SCORECARD.md, evals
 ```
 
+## Security and changes
+
+Found a way around Momo's protections? Please report it privately: see [SECURITY.md](SECURITY.md).
+What changed lately: [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 Momo is free software under the [GNU Affero General Public License v3.0](LICENSE):

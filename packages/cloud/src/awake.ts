@@ -40,20 +40,36 @@ export const showWindow = (w: Window) => `${two(Math.floor(w.start / 60))}:${two
 
 /**
  * The helper that holds this kind of computer awake for as long as process `pid` lives.
- * Idle sleep only: the screen may turn off, and closing a laptop's lid still puts it to sleep.
+ * Idle sleep only: the screen may turn off, and closing a laptop's lid still puts it to sleep, unless `lid` is
+ * set (MOMO_LID=awake): then on Linux the lid switch is held too, and on Windows closing the lid does nothing while
+ * the laptop is plugged in (on battery it still sleeps, so it never cooks in a bag). Windows' own setting is put
+ * back when Momo stops; `lidFile` remembers it in case Momo is cut off before it can. A Mac can't be kept awake
+ * with its lid closed without an administrator's password, so there it's left as it is.
  */
-export function holdCommand(platform: NodeJS.Platform, pid: number): { cmd: string; args: string[] } | undefined {
+export function holdCommand(platform: NodeJS.Platform, pid: number, lid = false, lidFile = ""): { cmd: string; args: string[] } | undefined {
   if (platform === "win32") {
     // ES_CONTINUOUS | ES_SYSTEM_REQUIRED, held by this helper's thread until Momo (its stdin) goes away.
+    const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    // The lid's action when plugged in: the first 0x… value in powercfg's answer, whatever the language.
+    const lidOn = lid && lidFile
+      ? [
+          `$f = ${q(lidFile)}`,
+          `$was = if (Test-Path $f) { Get-Content $f } else { ([regex]'0x[0-9a-fA-F]{8}').Match((powercfg /query SCHEME_CURRENT SUB_BUTTONS LIDACTION) -join ' ').Value }`,
+          `if ($was) { Set-Content $f $was; powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0; powercfg /setactive SCHEME_CURRENT }`,
+        ]
+      : [];
+    const lidOff = lid && lidFile ? [`if ($was) { powercfg /setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION ([Convert]::ToInt32($was, 16)); powercfg /setactive SCHEME_CURRENT; Remove-Item $f }`] : [];
     const script = [
+      ...lidOn,
       `$k = Add-Type -PassThru -Namespace Momo -Name Awake -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint f);'`,
       `[void]$k::SetThreadExecutionState([uint32]2147483649)`,
       `[void][Console]::In.ReadLine()`,
+      ...lidOff,
     ].join("; ");
     return { cmd: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", script] };
   }
   if (platform === "darwin") return { cmd: "caffeinate", args: ["-i", "-s", "-w", String(pid)] };
-  if (platform === "linux") return { cmd: "systemd-inhibit", args: ["--what=sleep:idle", "--who=Momo", "--why=Momo answers texts while this computer is awake", "tail", `--pid=${pid}`, "-f", "/dev/null"] };
+  if (platform === "linux") return { cmd: "systemd-inhibit", args: [`--what=sleep:idle${lid ? ":handle-lid-switch" : ""}`, "--who=Momo", "--why=Momo answers texts while this computer is awake", "tail", `--pid=${pid}`, "-f", "/dev/null"] };
   return undefined;
 }
 
@@ -66,6 +82,10 @@ export interface KeepAwakeOptions {
   now?: () => Date;
   spawn?: (cmd: string, args: string[]) => ChildProcess;
   log?: (m: string) => void;
+  /** Stay awake with the lid closed too, where that needs no administrator (see holdCommand). */
+  lid?: boolean;
+  /** Where Windows' own lid setting is remembered while Momo changes it. */
+  lidFile?: string;
 }
 
 export class KeepAwake {
@@ -103,7 +123,7 @@ export class KeepAwake {
   }
 
   private hold(): void {
-    const how = holdCommand(this.o.platform ?? process.platform, process.pid);
+    const how = holdCommand(this.o.platform ?? process.platform, process.pid, this.o.lid, this.o.lidFile);
     if (!how) {
       this.failed = true;
       return;
@@ -142,8 +162,8 @@ export class KeepAwake {
 }
 
 /** What the settings ask for: MOMO_AWAKE=off turns it off; MOMO_MAINTENANCE=HH:MM-HH:MM (or off) sets the rest. */
-export function awakeFromEnv(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): { on: boolean; window?: Window; note: string } {
-  if (env.MOMO_AWAKE === "off") return { on: false, note: "keep awake: off (Momo answers only while this computer is awake)" };
+export function awakeFromEnv(env: Record<string, string | undefined>, platform: NodeJS.Platform = process.platform): { on: boolean; window?: Window; lid: boolean; note: string } {
+  if (env.MOMO_AWAKE === "off") return { on: false, lid: false, note: "keep awake: off (Momo answers only while this computer is awake)" };
   // Only where something wakes the computer again at the end of the window; elsewhere a rest would never end.
   const window = platform === "win32" ? parseWindow(env.MOMO_MAINTENANCE ?? "03:00-05:00") : undefined;
   const rest = window
@@ -151,5 +171,13 @@ export function awakeFromEnv(env: Record<string, string | undefined>, platform: 
     : platform === "win32" || !parseWindow(env.MOMO_MAINTENANCE)
       ? ""
       : "; MOMO_MAINTENANCE is left aside here, because this computer can't wake itself afterwards";
-  return { on: true, window, note: `keep awake: on (this computer won't go to sleep while Momo runs; the screen still turns off, and a closed laptop lid still sleeps)${rest}` };
+  const lid = env.MOMO_LID === "awake";
+  const lidNote = !lid
+    ? "a closed laptop lid still sleeps; MOMO_LID=awake changes that"
+    : platform === "win32"
+      ? "with the lid closed too while plugged in; on battery a closed lid still sleeps"
+      : platform === "linux"
+        ? "with the lid closed too"
+        : "a closed lid still sleeps: a Mac needs an administrator for that, so Momo leaves it be";
+  return { on: true, window, lid: lid && platform !== "darwin", note: `keep awake: on (this computer won't go to sleep while Momo runs; the screen still turns off; ${lidNote})${rest}` };
 }
