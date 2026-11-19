@@ -25,21 +25,26 @@ export class BlandVoice implements VoiceProvider {
   private readonly apiKey: string;
   private readonly fetchImpl: typeof fetch;
   private readonly base: string;
+  /** Call from the owner's own number: one in their Twilio account, imported into Bland (BLAND_FROM, BLAND_TWILIO_KEY). */
+  private readonly from?: { number: string; twilioKey?: string };
 
   /** `base`: Bland itself, or the website's relay ("<site>/api") with `apiKey` = "Bearer <this Momo's token>", which calls on the operator's key. */
-  constructor(apiKey: string, fetchImpl: typeof fetch = fetch, base = "https://api.bland.ai/v1") {
+  constructor(apiKey: string, fetchImpl: typeof fetch = fetch, base = "https://api.bland.ai/v1", from?: { number: string; twilioKey?: string }) {
     this.apiKey = apiKey;
     this.fetchImpl = fetchImpl;
     this.base = base.replace(/\/$/, "");
+    this.from = from?.number ? from : undefined;
   }
 
   async start(req: { to: string; goal: string; webhookUrl?: string }): Promise<string | void> {
     if (!/^\+\d{8,15}$/.test(req.to.replace(/[\s()-]/g, ""))) throw new Error(`not a phone number: ${req.to}`);
     const res = await this.fetchImpl(`${this.base}/calls`, {
       method: "POST",
-      headers: { authorization: this.apiKey, "content-type": "application/json" },
+      // Bland's "bring your own Twilio": the number goes in `from`, the account's key in the encrypted_key header.
+      headers: { authorization: this.apiKey, "content-type": "application/json", ...(this.from?.twilioKey && { encrypted_key: this.from.twilioKey }) },
       body: JSON.stringify({
         phone_number: req.to.replace(/[\s()-]/g, ""),
+        ...(this.from && { from: this.from.number.replace(/[\s()-]/g, "") }),
         task: `${CALLER_RULES}\n\nGoal: ${req.goal}`,
         ...(req.webhookUrl && { webhook: req.webhookUrl }),
         wait_for_greeting: true,

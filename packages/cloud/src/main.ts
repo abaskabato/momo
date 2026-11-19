@@ -149,7 +149,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
     // website, which places them on the site's key. That is checked at startup rather than fixed at install, so
     // calling turns on for every Momo when the site gets a key. MOMO_CALLS=off turns calls off.
     voice: env.BLAND_API_KEY
-      ? new BlandVoice(env.BLAND_API_KEY)
+      ? new BlandVoice(env.BLAND_API_KEY, fetch, undefined, env.BLAND_FROM ? { number: env.BLAND_FROM, twilioKey: env.BLAND_TWILIO_KEY } : undefined)
       : env.MOMO_CALLS !== "off" && relay
         ? new BlandVoice(`Bearer ${relay.token}`, fetch, `${relay.url.replace(/\/$/, "")}/api`)
         : undefined,
@@ -212,7 +212,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
       if (env.MOMO_FRONTIER_MODEL && env.MOMO_FRONTIER_MODEL !== model) notes.push(`hybrid: ${model} does each step; ${env.MOMO_FRONTIER_MODEL} takes over when it's stuck and checks before anything final`);
       if (env.MOMO_LITE ? env.MOMO_LITE === "1" : isSmallModel(model)) notes.push("light mode for a small model: short instructions, core tools, small page views (MOMO_LITE=0 turns it off)");
       notes.push(!env.MOMO_ASK ? `asking: text and done (nothing waits for a YES${env.MOMO_SPEND_LIMIT === "none" ? "" : `, except a purchase over $${Number(env.MOMO_SPEND_LIMIT ?? 200) || 0}`}; MOMO_ASK=money brings the questions back)` : `asking: MOMO_ASK=${env.MOMO_ASK}`);
-      if (env.BLAND_API_KEY) notes.push("phone calls: on (Momo can phone businesses)");
+      if (env.BLAND_API_KEY) notes.push(`phone calls: on (Momo can phone businesses${env.BLAND_FROM ? `, from ${env.BLAND_FROM}` : ""})`);
       else if (env.MOMO_CALLS !== "off" && relay) {
         const site = await fetch(`${relay.url.replace(/\/$/, "")}/api/config`).then((r) => r.json() as Promise<{ calls?: boolean }>, () => ({}) as { calls?: boolean });
         notes.push(site.calls ? `phone calls: on, through ${relay.url} (Momo can phone businesses)` : `phone calls: not yet (${relay.url} has no calling key; they turn on by themselves when it does, or add BLAND_API_KEY here)`);
