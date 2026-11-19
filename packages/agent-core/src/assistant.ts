@@ -155,6 +155,22 @@ const DO_HINT =
 /** A question about what happened, not a new errand ("did you book it?", "what is done"). */
 const ASKING = /^(did|have|has|had|what|what'?s|whats|why|when|where|who|how|is|are|was|were|do you|does|any (update|news|luck)|status|so)\b/i;
 
+/**
+ * A fact that changes, so it is looked up, never answered from memory: opening hours today, a price, whether it's
+ * in stock, the weather, a delivery or a flight. A model answering "closes at 8:30" from what it once read is a
+ * guess presented as a fact; small models do it whatever their instructions say, so this is decided here.
+ */
+const LIVE_FACT = /\b(open|opens|close|closes|closing|hours|price|prices|cost|costs|how much|in stock|available|availability|sold out|weather|forecast|rain|track|tracking|delivery|delivered|arrive|arriving|shipped|flight|delayed|wait time|showtimes?|tickets?|score|exchange rate)\b/i;
+const LIVE_WHEN = /\b(today|tonight|tomorrow|now|right now|currently|still|this (morning|afternoon|evening|week|weekend)|on (mon|tues|wednes|thurs|fri|satur|sun)day)\b|\b\d{10,}\b|\b[A-Z]{2}\d{9}[A-Z]{2}\b/i;
+/** About Momo's own work ("did you book it?", "what did you order?"), which the conversation answers. */
+const ABOUT_MOMO = /^(did|have|has|had)\b|\b(you|you've|you'd)\b.*\b(book|booked|order|ordered|buy|bought|send|sent|do|did|done|finish|finished|find|found|get|got)\b/i;
+
+/** A question that needs a lookup now, by its wording. */
+export function needsLookup(text: string): boolean {
+  const t = text.trim();
+  return !ABOUT_MOMO.test(t) && ((LIVE_FACT.test(t) && LIVE_WHEN.test(t)) || /\b(track|tracking)\b.*\b[\dA-Z]{10,}\b/i.test(t));
+}
+
 export class Assistant {
   private readonly d: AssistantDeps;
   private readonly ctx: SkillContext;
@@ -379,12 +395,13 @@ export class Assistant {
     if (connecting) return connecting;
 
     // "did you book it?" is a question about what happened, not a new booking.
-    const asking = !!this.d.answer && ASKING.test(text) && text.length < 80;
+    const lookup = needsLookup(text);
+    const asking = !!this.d.answer && !lookup && ASKING.test(text) && text.length < 80;
     // Sent while Momo was busy with an errand ("I see you opened the browser", "make it Tuesday"): usually a
     // remark on that errand, so its wording alone doesn't start a new one; the model decides.
     const busy = JSON.parse((await this.d.memory.get("busy.last")) ?? "null") as { from: number; until: number; what: string } | null;
     const during = !!this.d.answer && !!busy && msg.receivedAt >= busy.from - 1000 && msg.receivedAt + 1000 < busy.until && !/https?:\/\//i.test(text);
-    let skill = asking || during ? undefined : this.d.skills.find((s) => s.matches(text));
+    let skill = asking || during ? undefined : this.d.skills.find((s) => s.matches(text)) ?? (lookup ? this.d.skills.find((s) => s.name === "web") : undefined);
     if (!skill && (await this.onboard(msg, text, say))) return { handled: true };
     if (!skill && this.d.answer) {
       // Not obviously an errand by its wording: let the model say whether it's something to DO.

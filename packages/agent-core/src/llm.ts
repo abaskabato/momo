@@ -11,6 +11,7 @@
 
 import { downloadProgress, pullOllamaModel } from "./local.ts";
 import type { Block, Planner, Spent, ToolSpec, Turn } from "./skills/web/agent.ts";
+import { rut } from "./skills/web/agent.ts";
 import { ClaudeAnswerer, ClaudePlanner, type Effort } from "./skills/web/claude.ts";
 
 export interface Answerer {
@@ -527,6 +528,8 @@ export function stuck(history: Turn[]): string {
   const results = history.filter((t) => t.role === "user" && t.content.some((b) => b.type === "tool_result"));
   const failed = (t: Turn) => t.content.some((b) => b.type === "tool_result" && (b as { is_error?: boolean }).is_error);
   if (results.length >= 2 && results.slice(-2).every(failed)) return "two steps in a row went wrong";
+  const circling = rut(history);
+  if (circling) return `the local model is going round in circles (${circling.split(":")[0]})`;
   const last = history.at(-1);
   if (last?.role === "user" && last.content.some((b) => b.type === "text" && /^You returned nothing/.test((b as { text: string }).text))) return "the local model returned nothing";
   const moves = history.filter((t) => t.role === "assistant").slice(-3).map((t) =>

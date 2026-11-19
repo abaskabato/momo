@@ -192,6 +192,50 @@ const LITE_TOOLS: Record<string, string> = {
 };
 
 /** Small models: past maxTurns, drop the oldest steps (an assistant turn and its results) down to keepTurns. */
+/** The steps so far, oldest first: what was called, with what, and whether it went wrong. */
+function stepsOf(history: Turn[]): Array<{ name: string; url?: string; error: boolean }> {
+  const results = new Map<string, boolean>();
+  for (const t of history) for (const b of t.content) if (b.type === "tool_result") results.set((b as { tool_use_id: string }).tool_use_id, !!(b as { is_error?: boolean }).is_error);
+  const out: Array<{ name: string; url?: string; error: boolean }> = [];
+  for (const t of history) {
+    if (t.role !== "assistant") continue;
+    for (const b of t.content) {
+      if (b.type !== "tool_use") continue;
+      const call = b as { id: string; name: string; input: Record<string, unknown> };
+      out.push({ name: call.name, url: typeof call.input?.url === "string" ? call.input.url : undefined, error: results.get(call.id) ?? false });
+    }
+  }
+  return out;
+}
+
+const SEARCH = /^https?:\/\/([\w.-]+\.)?(google\.[a-z.]+\/search|bing\.com\/search|duckduckgo\.com|search\.yahoo\.com|search\.brave\.com)/i;
+const hostOf = (u: string) => { try { return new URL(u).host.replace(/^www\./, ""); } catch { return ""; } };
+
+/** How many search pages in a row, with no result opened, count as going round in circles. */
+export const SEARCH_RUT = 5;
+
+/**
+ * Whether the errand is going round in circles, as a note for the model, or "" if it isn't: search after search
+ * without opening a result, or reopening a site that keeps refusing this browser. On real sites a small model did
+ * 30 reworded Google searches for a restaurant before giving up; a nudge to change course is what it needed.
+ */
+export function rut(history: Turn[]): string {
+  const steps = stepsOf(history);
+  const last = steps.at(-1);
+  if (!last) return "";
+  let searches = 0;
+  for (let i = steps.length - 1; i >= 0 && steps[i]!.name === "goto" && SEARCH.test(steps[i]!.url ?? ""); i--) searches++;
+  if (searches >= SEARCH_RUT && searches % SEARCH_RUT === 0) {
+    return `That's ${searches} searches in a row without opening a result. Stop rewording the search: open the most promising result above, go straight to another site that does this, phone the business, or call finish and say plainly what you found and what's left.`;
+  }
+  if (last.name === "goto" && last.error && last.url) {
+    const host = hostOf(last.url);
+    const refused = steps.filter((x) => x.name === "goto" && x.error && x.url && hostOf(x.url) === host).length;
+    if (host && refused >= 2) return `${host} has refused this browser ${refused} times. Don't open it again: use another site that does the same thing (or the business's own site), phone them, or call finish and say what's left.`;
+  }
+  return "";
+}
+
 export function forgetOldSteps(history: Turn[], maxTurns: number, keepTurns: number): void {
   if (history.length <= 1 + maxTurns) return;
   while (history.length > 1 + keepTurns && history[1]?.role === "assistant" && history[2]?.role === "user") history.splice(1, 2);
@@ -597,6 +641,10 @@ export class WebTaskSkill implements Skill {
           : r.result;
         results.push({ type: "tool_result", tool_use_id: call.id, content, is_error: r.error });
       }
+      // Going round in circles: say so with the last result, so the next step changes course.
+      const circling = rut([...s.history, { role: "user", content: results }]);
+      const tail = results.at(-1) as { content?: unknown } | undefined;
+      if (circling && tail && typeof tail.content === "string") tail.content = `${tail.content}\n\nNote from Momo: ${circling}`;
       s.history.push({ role: "user", content: results });
       await ctx.tasks.save(task);
     }
