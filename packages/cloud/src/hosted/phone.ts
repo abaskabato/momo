@@ -47,6 +47,8 @@ export class BlandVoice implements VoiceProvider {
       }),
     });
     const body = (await res.json().catch(() => ({}))) as { call_id?: string; message?: string };
+    // Through a Momo website that has no calling key yet.
+    if (res.status === 404) throw new Error("Phone calls aren't switched on for this Momo yet. Try a website instead, or tell the owner the number to call.");
     if (!res.ok) throw new Error(`call failed to start (${res.status}${body.message ? `: ${body.message}` : ""})`);
     return body.call_id;
   }
