@@ -4,6 +4,12 @@ What changed in Momo, newest first. Momo updates itself from `main` when its ins
 
 ## 2026-11-19
 
+- On a phone call, when the business asks something only you know ("7:30 or 9?"), Momo texts you the question and
+  waits up to two minutes; your reply goes straight into the call. Reply "skip" and it says it'll confirm later.
+  This works on calls placed through the Momo website.
+- Calling turns on by itself for every Momo once its website has a calling key. `BLAND_FROM` and
+  `BLAND_TWILIO_KEY` make calls on your own key come from your own number.
+- When a call ends, Momo knows how long it took (and on your own key, what it cost).
 - Questions about something that changes (hours today, a price, stock, the weather, a delivery or a flight) are
   looked up on the web, never answered from the AI's memory. Before, "what time does Costco close today?" was
   answered with a guess.

@@ -58,6 +58,24 @@ async function sha256(s) {
   return b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s))));
 }
 
+/** What the voice agent is told about asking the customer (the person it's calling for) mid-call. */
+const ASK_RULES =
+  "If they ask something only the customer can answer (a time that suits them, a detail you weren't given), say \"one moment, let me check\" " +
+  "and use the AskCustomer tool, then pass on {{customer_answer}}. Never guess. If no answer comes back, say you'll confirm and call back.";
+/** A Bland custom tool (docs.bland.ai/tutorials/custom-tools): it posts the question here and waits for the answer. */
+const askTool = (url) => ({
+  name: "AskCustomer",
+  description: "Text the customer you're calling for a question only they can answer, and wait for their reply (up to two minutes).",
+  speech: "One moment, let me check with them.",
+  url,
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: { question: "{{input.question}}" },
+  input_schema: { example: { question: "Is 7:30 instead of 8 okay?" }, type: "object", properties: { question: { type: "string" } }, required: ["question"] },
+  response: { customer_answer: "$.answer" },
+  timeout: 120_000,
+});
+
 /** Upstash Redis over REST (Vercel Storage → Upstash sets these env vars). */
 export function upstashStore(url, token, f = fetch) {
   const call = async (cmd) => {
@@ -209,6 +227,8 @@ export function operatorConfig(env) {
  * Shared phone calls (BLAND_API_KEY on the server):
  *   POST /api/calls                  their Momo (Bearer): place a call to a business; the key stays here
  *   GET  /api/calls/<id>             their Momo: how that call went (only the Momo that placed it)
+ *   POST /api/calls/ask/<q>          Bland, mid-call: {question} the voice agent can't answer. The owner is
+ *                                    texted it, and their next text (within ~2 minutes) is the answer
  *
  * Shared model key (MOMO_MODEL + key on the server):
  *   POST /api/model/v1/chat/completions   their Momo (Bearer): OpenAI-compatible, forwarded
@@ -218,7 +238,7 @@ export function operatorConfig(env) {
  *   GET  /api/pay/<code>             Stripe Checkout for that Momo (the link Momo's owner is texted)
  *   GET  /api/pay/<code>/done        back from Checkout: the subscription is checked with Stripe and kept
  */
-export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600, phoneCallsPerDay = 20 } = {}) {
+export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devicesPerHour = 20, formsPerHour = 120, modelCallsPerHour = 600, sendsPerHour = 600, phoneCallsPerDay = 20, askWaitMs = 110_000, askPollMs = 1000 } = {}) {
   const op = operatorConfig(env);
   const tg = (method, body) =>
     f(`${env.TELEGRAM_API_BASE || "https://api.telegram.org"}/bot${op.botToken}/${method}`, {
@@ -307,6 +327,9 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
       await store.set(`devowner:${dev}`, who);
     }
     await store.set(`devchat:${dev}`, chat); // answers go wherever they last texted from
+    // A call is waiting on them: this text is the answer to its question, not a new errand.
+    const asked = await store.getdel(`callq:${dev}`);
+    if (asked) return void (await store.set(`callans:${asked}`, message.text, 300));
     await store.rpush(`inbox:${dev}`, JSON.stringify({ ...message, from: who }), INBOX_TTL_S);
   }
 
@@ -505,6 +528,28 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
     }
 
     // --- Shared phone calls --------------------------------------------------
+    // Mid-call, the voice agent asks the owner something (the link in the call's tool is the only proof).
+    if (parts[0] === "calls" && parts[1] === "ask" && m === "POST") {
+      const q = parts[2] ?? "";
+      const dev = /^[\w-]{20,64}$/.test(q) ? await store.get(`callask:${q}`) : null;
+      if (!dev) return json({ error: "not found" }, 404);
+      const { question } = await body();
+      if (typeof question !== "string" || !question.trim()) return json({ answer: "" }, 400);
+      if ((await store.incr(`rl:ask:${q}`, 3600)) > 5) return json({ answer: "Don't ask them anything else on this call; say you'll confirm and call back." });
+      await store.set(`callq:${dev}`, q, Math.ceil(askWaitMs / 1000) + 30);
+      await tell(dev, `On the phone now, they're asking: "${question.trim().slice(0, 500)}"\nText me the answer and I'll tell them (or "skip").`);
+      for (const end = Date.now() + askWaitMs; Date.now() < end; ) {
+        const a = await store.getdel(`callans:${q}`);
+        if (a !== null && a !== undefined) {
+          if (/^\s*skip\W*$/i.test(a)) break;
+          return json({ answer: a.slice(0, 1000) });
+        }
+        await new Promise((r) => setTimeout(r, askPollMs));
+      }
+      if ((await store.get(`callq:${dev}`)) === q) await store.del(`callq:${dev}`);
+      return json({ answer: "The customer didn't answer that. Say you'll confirm with them and call back." });
+    }
+
     if (parts[0] === "calls") {
       const dev = await device();
       if (!dev) return json({ error: "unauthorized" }, 401);
@@ -517,10 +562,20 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
         const b = await body();
         const to = typeof b.phone_number === "string" ? b.phone_number.replace(/[\s()-]/g, "") : "";
         if (!/^\+\d{8,15}$/.test(to) || typeof b.task !== "string" || !b.task || b.task.length > 6000) return json({ message: "bad request" }, 400);
+        // When the business asks something only the owner knows, the voice agent texts them through here and waits.
+        const site = op.publicUrl || url.origin;
+        const q = (await store.get(`devchat:${dev}`)) && /^https:/.test(site) ? randomToken(18) : null;
+        if (q) await store.set(`callask:${q}`, dev, 3600);
         const up = await f(`${bland}/calls`, {
           method: "POST",
           headers: { authorization: op.callsKey, "content-type": "application/json" },
-          body: JSON.stringify({ phone_number: to, task: b.task, wait_for_greeting: true, max_duration: 10 }),
+          body: JSON.stringify({
+            phone_number: to,
+            task: q ? `${b.task}\n\n${ASK_RULES}` : b.task,
+            wait_for_greeting: true,
+            max_duration: 10,
+            ...(q && { tools: [askTool(`${site}/api/calls/ask/${q}`)] }),
+          }),
         });
         const out = await up.json().catch(() => ({}));
         if (up.ok && typeof out.call_id === "string") await store.set(`callof:${out.call_id}`, dev, 7 * 24 * 3600);
@@ -532,7 +587,7 @@ export function createRelay(store, { env = {}, fetch: f = globalThis.fetch, devi
         const up = await f(`${bland}/calls/${encodeURIComponent(parts[1])}`, { headers: { authorization: op.callsKey } });
         const out = await up.json().catch(() => ({}));
         // Only what Momo reads: the status and what was said.
-        return json({ completed: out.completed, status: out.status, answered_by: out.answered_by, summary: out.summary, concatenated_transcript: out.concatenated_transcript }, up.status);
+        return json({ completed: out.completed, status: out.status, answered_by: out.answered_by, summary: out.summary, concatenated_transcript: out.concatenated_transcript, call_length: out.call_length }, up.status);
       }
       return json({ error: "not found" }, 404);
     }

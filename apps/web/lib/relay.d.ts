@@ -18,5 +18,5 @@ export function memoryStore(): RelayStore & { dump(): string[] };
 export function storeFromEnv(env: Record<string, string | undefined>): RelayStore | null;
 export function createRelay(
   store: RelayStore | null,
-  opts?: { env?: Record<string, string | undefined>; fetch?: typeof fetch; devicesPerHour?: number; formsPerHour?: number; modelCallsPerHour?: number; sendsPerHour?: number; phoneCallsPerDay?: number },
+  opts?: { env?: Record<string, string | undefined>; fetch?: typeof fetch; devicesPerHour?: number; formsPerHour?: number; modelCallsPerHour?: number; sendsPerHour?: number; phoneCallsPerDay?: number; askWaitMs?: number; askPollMs?: number },
 ): (req: Request) => Promise<Response>;

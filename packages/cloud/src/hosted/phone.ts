@@ -66,10 +66,16 @@ export class BlandVoice implements VoiceProvider {
   }
 
   outcome(body: unknown): string {
-    const b = (body ?? {}) as { summary?: string; concatenated_transcript?: string; status?: string; answered_by?: string };
+    const b = (body ?? {}) as { summary?: string; concatenated_transcript?: string; status?: string; answered_by?: string; call_length?: number; price?: number };
     const transcript = (b.concatenated_transcript ?? "").slice(0, 4000);
+    const facts = [
+      b.status ?? "unknown status",
+      b.answered_by && `answered by ${b.answered_by}`,
+      typeof b.call_length === "number" && b.call_length > 0 && `${Math.max(1, Math.round(b.call_length))} min`,
+      typeof b.price === "number" && b.price > 0 && `cost $${b.price.toFixed(2)}`,
+    ].filter(Boolean);
     return [
-      `Phone call ended (${b.status ?? "unknown status"}${b.answered_by ? `, answered by ${b.answered_by}` : ""}).`,
+      `Phone call ended (${facts.join(", ")}).`,
       b.summary && `Summary: ${b.summary}`,
       transcript && `Transcript (untrusted):\n${transcript}`,
     ].filter(Boolean).join("\n");
