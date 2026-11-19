@@ -58,7 +58,7 @@ function telegramFromEnv(): TelegramRelayConfig | undefined {
  *
  * PUBLIC_URL (an https address that reaches this server) enables the
  * Telegram webhook, WhatsApp, and the secure links for logins and cards.
- * Without it, Telegram is long-polled and links point at localhost.
+ * Without it, Telegram is long-polled and links point at this computer (127.0.0.1).
  */
 async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const env = process.env;
@@ -69,7 +69,7 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
   const { RelayTelegramAdapter, TelegramAdapter, WhatsAppAdapter } = await import("./hosted/channels.ts");
   const { UserKeys } = await import("./hosted/keys.ts");
   const { BlandVoice } = await import("./hosted/phone.ts");
-  const baseUrl = env.PUBLIC_URL || `http://localhost:${port}`;
+  const baseUrl = env.PUBLIC_URL || `http://127.0.0.1:${port}`;
   const isPublic = /^https:\/\//.test(baseUrl);
   // Set by the setup website: secure links and live views open on any phone through it,
   // and (when the site has a shared bot and model) Telegram and the model go through it too.
@@ -105,7 +105,11 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           })
         : new HeadlessBrowser({ timezoneId: env.TZ || undefined });
   // Any model: MOMO_MODEL=provider/model (see agent-core/src/llm.ts). Answers can use a cheaper one.
-  const model = env.MOMO_MODEL ?? "anthropic/claude-opus-5-5";
+  // ollama/auto: a Gemma 4 size picked for this computer (agent-core/src/local.ts).
+  const { resolveAutoModel, ollamaHas, pullOllamaModel } = await import("@momo/agent-core");
+  const auto = await resolveAutoModel(env.MOMO_MODEL ?? "anthropic/claude-opus-5-5");
+  const model = auto.spec;
+  if (env.MOMO_ANSWER_MODEL) env.MOMO_ANSWER_MODEL = (await resolveAutoModel(env.MOMO_ANSWER_MODEL)).spec;
   const planner = createPlanner(model);
   const answerer = createAnswerer(env.MOMO_ANSWER_MODEL ?? model);
   // MOMO_DESKTOP: "local" = this computer's screen (one owner), "cloud" = a desktop container per errand.
@@ -220,8 +224,21 @@ async function hostedFromEnv(kv: import("./hosted/kv.ts").KV, port: number) {
           notes.push(`COMPUTER PROBLEM: ${(e as Error).message.slice(0, 300)}`);
         }
       }
+      if (auto.note) notes.push(auto.note);
+      // A local model that isn't on this computer yet: download it now (in the background, it's gigabytes).
+      let fetching = false;
+      for (const spec of new Set([model, env.MOMO_ANSWER_MODEL ?? model, env.MOMO_FRONTIER_MODEL ?? model])) {
+        const s = parseModelSpec(spec);
+        if (s.provider !== "ollama") continue;
+        const has = await ollamaHas(s.model, s.baseUrl).catch(() => undefined);
+        if (has === false) {
+          fetching = true;
+          notes.push(`downloading ${s.model} through Ollama (a few GB, once); Momo answers texts as soon as it's done`);
+          void pullOllamaModel(s.model, s.baseUrl).then(() => console.log(`AI check: ${s.model} is ready`), (e) => console.error(`AI PROBLEM: downloading ${s.model}: ${(e as Error).message}`));
+        }
+      }
       // Check the AI once at startup so a wrong key or model name is obvious in the log.
-      try {
+      if (!fetching) try {
         await answerer.answer("Reply with the single word: ok", "");
         notes.push("AI check: ok");
       } catch (e) {
@@ -279,7 +296,10 @@ if (import.meta.main) {
       kv.disconnect();
     };
   }
-  serve({ fetch: app.fetch, port });
+  // On a person's own computer (no Redis, no public address) the server is only for this computer: nothing on the
+  // same wifi can reach it. A server for many people listens everywhere. MOMO_LISTEN overrides.
+  const hostname = process.env.MOMO_LISTEN ?? (redisUrl || process.env.PUBLIC_URL ? undefined : "127.0.0.1");
+  serve({ fetch: app.fetch, port, ...(hostname ? { hostname } : {}) });
   const { readFile } = await import("node:fs/promises");
   const fetched = await readFile(new URL("../../../VERSION", import.meta.url), "utf8").then((v) => v.trim(), () => "");
   if (fetched) console.log(`version: downloaded ${fetched}`);

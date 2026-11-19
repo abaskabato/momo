@@ -15,7 +15,7 @@ const PROVIDERS = [
     check: (k) => fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${k}` } }) },
   { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", model: "openai/gpt-oss-120b", keyUrl: "https://console.groq.com/keys",
     check: (k) => fetch("https://api.groq.com/openai/v1/models", { headers: { authorization: `Bearer ${k}` } }) },
-  { id: "ollama", label: "Ollama (a model on this computer, no key)", model: "" },
+  { id: "ollama", label: "Ollama (a model on this computer, no key)", model: "auto" }, // auto: Momo picks a Gemma 4 size for the computer and downloads it,
 ];
 
 const $ = (id) => document.getElementById(id);

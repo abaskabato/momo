@@ -28,7 +28,7 @@ export const PROVIDERS: Provider[] = [
   { id: "openai", label: "OpenAI", keyEnv: "OPENAI_API_KEY", keyUrl: "https://platform.openai.com/api-keys" },
   { id: "openrouter", label: "OpenRouter (hundreds of models)", keyEnv: "OPENROUTER_API_KEY", keyUrl: "https://openrouter.ai/keys" },
   { id: "groq", label: "Groq", keyEnv: "GROQ_API_KEY", keyUrl: "https://console.groq.com/keys" },
-  { id: "ollama", label: "Ollama (a model on this computer, no key)" },
+  { id: "ollama", label: "Ollama (a model on this computer, no key)", defaultModel: "auto" },
 ];
 
 /** Parse KEY=value lines (comments and blanks ignored). */

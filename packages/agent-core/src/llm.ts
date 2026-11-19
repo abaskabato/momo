@@ -9,6 +9,7 @@
 //                                     (MOMO_MODEL_BASE_URL, MOMO_MODEL_API_KEY)
 // Non-Anthropic providers use OpenAI-style chat completions with tools.
 
+import { downloadProgress, pullOllamaModel } from "./local.ts";
 import type { Block, Planner, Spent, ToolSpec, Turn } from "./skills/web/agent.ts";
 import { ClaudeAnswerer, ClaudePlanner, type Effort } from "./skills/web/claude.ts";
 
@@ -375,7 +376,12 @@ async function ollamaChat(s: ModelSpec, o: LocalOptions, fetchImpl: typeof fetch
   }
   if (!res.ok) {
     const text = (await res.text()).slice(0, 300);
-    if (res.status === 404 && /not found/i.test(text)) throw new Error(`Ollama doesn't have ${s.model} yet. Run: ollama pull ${s.model}`);
+    if (res.status === 404 && /not found/i.test(text)) {
+      // Not on this computer yet: Momo fetches it itself (once), and says so meanwhile.
+      const pct = downloadProgress(s.model);
+      if (pct === undefined) void pullOllamaModel(s.model, s.baseUrl, console.log, fetchImpl).catch((e) => console.error(`downloading ${s.model}: ${(e as Error).message}`));
+      throw new Error(`I'm still downloading my AI (${s.model}${pct ? `, ${pct}% done` : ""}). It's a few gigabytes, once; text me again in a few minutes.`);
+    }
     throw new Error(`ollama ${res.status}: ${text}`);
   }
   return (await res.json()) as OllamaReply;

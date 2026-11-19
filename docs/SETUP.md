@@ -136,8 +136,29 @@ Where Momo works (`MOMO_DESKTOP` in `momo.env`):
 
 Momo can run on a model on the owner's own computer, with no AI key and nothing sent to an AI company.
 
-1. Install Ollama (ollama.com) and download a model: `ollama pull qwen3.5:4b`.
-2. In `momo.env`: `MOMO_MODEL=ollama/qwen3.5:4b`.
+1. Install Ollama (ollama.com) and leave it running.
+2. In `momo.env`: `MOMO_MODEL=ollama/auto` (the setup page writes this when you pick Ollama).
+
+With `auto`, Momo picks a Gemma 4 size that fits the computer, as Tiles (tiles.run) does:
+
+| This computer | Model |
+|---|---|
+| Apple silicon, 32 GB or more | `gemma4:26b` (4B active of 26B, fast for its size) |
+| Apple silicon, 16 GB; or an NVIDIA card with 10 GB or more | `gemma4:12b` |
+| Apple silicon, 12 GB; an NVIDIA card with 7 GB; or 16 GB without a usable graphics card | `gemma4:e4b` |
+| Anything smaller | `gemma4:e2b` |
+
+An NVIDIA card with 20 GB or more also gets `gemma4:26b`. Without a graphics card Ollama runs the model on the
+processor, where a big one is too slow to text with, so those computers get a small one. To choose yourself, name
+the model: `MOMO_MODEL=ollama/qwen3.5:4b`.
+
+If Ollama doesn't have the model yet, Momo downloads it at startup (a few GB, once) and logs the progress.
+Anyone who texts before it's done is told it's still downloading. With a frontier model set (below), that
+model answers in the meantime.
+
+On a person's own computer, Momo's local web server (port 8787) only accepts connections from that computer,
+so nothing else on the same wifi can reach it. A server for many people (with `REDIS_URL` or `PUBLIC_URL`)
+listens on every address. `MOMO_LISTEN` overrides either.
 
 What Momo does for a local model:
 
