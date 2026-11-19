@@ -279,6 +279,9 @@ interface State {
   waitingFor?: { kind: Pause; toolUseId: string; selector?: string };
   /** Results for the other tool calls in the batch that paused. */
   pendingResults?: Block[];
+  /** Steps in a row that showed a human check without handing it over. */
+  humanChecks?: number;
+  sawCheck?: boolean;
   /** Arguments of the approval the next commit click will consume. */
   approvedArgs?: Record<string, unknown>;
   commitAllowed?: boolean;
@@ -528,9 +531,10 @@ export class WebTaskSkill implements Skill {
     s.history.push({
       role: "user",
       // No tool call to answer when the model asked in plain words.
+      // Without one, the answer follows the step's own results (Momo paused it in code, e.g. for a human check).
       content: s.waitingFor!.toolUseId
         ? [...(s.pendingResults ?? []), { type: "tool_result", tool_use_id: s.waitingFor!.toolUseId, content: result }]
-        : [{ type: "text", text: result }],
+        : [...(s.pendingResults ?? []), { type: "text", text: result }],
     });
     s.waitingFor = undefined;
     s.pendingResults = undefined;
@@ -640,6 +644,25 @@ export class WebTaskSkill implements Skill {
           ? [{ type: "text", text: r.result }, { type: "image", source: { type: "base64", media_type: r.imageType ?? "image/jpeg", data: r.image } }]
           : r.result;
         results.push({ type: "tool_result", tool_use_id: call.id, content, is_error: r.error });
+      }
+      // A human check the model doesn't hand over (small models often just keep trying): once it has been shown
+      // the check and done something else twice, and the check is still there, hand it to the owner in code.
+      const checked = results.some((r) => r.type === "tool_result" && typeof r.content === "string" && r.content.includes(HUMAN_CHECK_NOTE));
+      s.humanChecks = s.sawCheck && !calls.some((c) => c.name === "hand_to_owner") ? (s.humanChecks ?? 0) + 1 : 0;
+      s.sawCheck = checked;
+      const open = this.pages.get(task.id);
+      if (checked && s.humanChecks >= 2 && ctx.liveViews && open) {
+        s.humanChecks = 0;
+        s.sawCheck = false;
+        const url = await ctx.liveViews.create(task, open.page, "This site wants to check I'm a person.");
+        task.status = "awaiting_input";
+        await ctx.reply(task, `This site wants to check I'm a person, and only you can do that. Tap here, do the check, then tap "I'm done":\n${url}`);
+        s.pendingResults = results;
+        s.waitingFor = { kind: "live", toolUseId: "" };
+        s.url = open.page.url();
+        s.storage = await open.page.context().storageState();
+        await ctx.tasks.save(task, "paused for live (human check)");
+        return;
       }
       // Going round in circles: say so with the last result, so the next step changes course.
       const circling = rut([...s.history, { role: "user", content: results }]);
@@ -1274,7 +1297,9 @@ async function fillFields(sess: Session, fields: unknown, values: Record<string,
   }
 }
 
-const CAPTCHA = /captcha|hcaptcha|turnstile|verify (that )?you(?:'| a)re (a )?human|are you a robot|press (and|&) hold/i;
+// Amazon's says "make sure you're not a robot" and "enter the characters you see"; Google's, "unusual traffic".
+export const CAPTCHA = /captcha|hcaptcha|turnstile|verify (that )?you(?:'| a)re (a )?human|are you a robot|(?:you're|you are) not a robot|characters you see|unusual traffic from your computer|press (and|&) hold/i;
+export const HUMAN_CHECK_NOTE = "Note: this page shows a human check. Use hand_to_owner.";
 
 /** Compact, model-friendly page view. Input values are never included. */
 export async function snapshot(sess: Session, retry = true, small = false): Promise<string> {
@@ -1328,6 +1353,6 @@ async function snapshotOnce(sess: Session, small = false): Promise<string> {
   // A late navigation (someone tapped in the live view, a JS redirect) would mix two pages.
   if (sess.page.url() !== startUrl) throw new Error("page navigated while reading");
   const frames = sess.page.frames().map((f) => f.url()).join(" ");
-  const captcha = CAPTCHA.test(body) || CAPTCHA.test(frames) ? "\nNote: this page shows a human check. Use hand_to_owner." : "";
+  const captcha = CAPTCHA.test(body) || CAPTCHA.test(frames) || /captcha/i.test(new URL(sess.page.url()).pathname) ? `\n${HUMAN_CHECK_NOTE}` : "";
   return `URL: ${sess.page.url()}\nTitle: ${await sess.page.title()}\n<untrusted_page_text>\n${body}\n</untrusted_page_text>\nElements:\n${items.join("\n")}${more}${captcha}`;
 }

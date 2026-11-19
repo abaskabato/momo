@@ -4,6 +4,9 @@ What changed in Momo, newest first. Momo updates itself from `main` when its ins
 
 ## 2026-11-19
 
+- Amazon's "make sure you're not a robot" page (and Google's "unusual traffic") is recognised as a human check.
+  If the AI keeps trying instead of handing it over, which small local models do, Momo texts you the live view
+  itself after two tries, instead of getting stuck.
 - On a phone call, when the business asks something only you know ("7:30 or 9?"), Momo texts you the question and
   waits up to two minutes; your reply goes straight into the call. Reply "skip" and it says it'll confirm later.
   This works on calls placed through the Momo website.

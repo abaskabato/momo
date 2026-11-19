@@ -293,6 +293,27 @@ test(`shopping errand via ${via}: texted code, human check via live view, addres
 });
 }
 
+test("a human check the model doesn't hand over (small models just keep reading): Momo sends the owner the live view itself", { timeout: 60_000 }, async () => {
+  let reads = 0;
+  const { planner, histories } = scripted(`${shop.origin}/human`, (prev, r) => {
+    if (prev.name === "goto") return ["read_page"];
+    if (prev.name === "read_page" && /Title: Quick check/.test(r)) {
+      reads++;
+      return ["read_page"]; // ignores the note, as a 4B model did on Amazon's "not a robot" page
+    }
+    if (prev.name === "read_page") return ["finish", { message: "Past the check." }];
+    throw new Error(`planner: unexpected ${prev.name}`);
+  });
+  const { rt, app } = runtime(planner);
+  const msg = await tg(app, rt, "order me a diet coke from ShopNow");
+  assert.match(msg, /^This site wants to check I'm a person, and only you can do that\. Tap here, do the check, then tap "I'm done":\nhttps:\/\/momo\.example\/l\//);
+  assert.equal(reads, 1, "handed over once the model had looked past it twice, not left looping");
+  await directPhone(app, rt).live(msg);
+  assert.equal(sent.at(-1)!.text, "Past the check.");
+  // The model was told what happened, after the results of the step Momo paused.
+  assert.match(JSON.stringify(histories.at(-1)), /The owner finished on the live view/);
+});
+
 test("no online booking: Momo phones the restaurant, then adds it to the calendar", { timeout: 60_000 }, async () => {
   const calls: Array<{ to: string; goal: string; webhookUrl?: string }> = [];
   const voice: VoiceProvider = {
